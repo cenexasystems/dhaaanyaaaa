@@ -1,6 +1,6 @@
 const CACHE_NAME = 'dhanyas-boutique-pos-v1';
 const ASSETS_TO_CACHE = [
-  '/',
+  '/store',
   '/manifest.json',
   '/logo.svg',
   '/logo.png',
