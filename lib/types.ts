@@ -159,6 +159,7 @@ export type ShopSettings = {
   business_hours: string;
   services: string;
   gstin: string;
+  accent_color: string; // hex e.g. '#31042F' — drives the theme app-wide
   logo_data_url: string | null; // data:image/...; null = use bundled /logo.svg
   updated_at?: string;
 };

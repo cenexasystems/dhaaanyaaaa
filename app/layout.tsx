@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
 import PWAHandler from "./components/PWAHandler";
-import { getShopSettings, shopLogoSrc } from "@/lib/shopSettings";
+import { getShopSettings, shopLogoSrc, accentCssVars, normalizeHex, DEFAULT_ACCENT } from "@/lib/shopSettings";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -11,13 +11,16 @@ const poppins = Poppins({
   display: "swap",
 });
 
-export const viewport: Viewport = {
-  themeColor: "#35617C",
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-};
+export async function generateViewport(): Promise<Viewport> {
+  const shop = await getShopSettings();
+  return {
+    themeColor: normalizeHex(shop.accent_color) || DEFAULT_ACCENT,
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+  };
+}
 
 // Shop profile drives the installed-app name and icon.
 export async function generateMetadata(): Promise<Metadata> {
@@ -52,6 +55,7 @@ export default async function RootLayout({
     <html
       lang="en"
       className={`${poppins.variable} h-full antialiased`}
+      style={accentCssVars(shop.accent_color) as React.CSSProperties}
     >
       <head>
         <link rel="manifest" href="/manifest.json" />

@@ -4,6 +4,15 @@ A PWA-enabled Point of Sale (POS), billing, and inventory management system for 
 
 ## Features
 
+### 🎨 Appearance (Admin only)
+- **20 preset swatches** plus a native colour picker and a hex field (`#RRGGBB`) for any custom shade
+- **Live preview** — the whole POS repaints as you pick, before you save
+- **One colour drives the entire app**: POS chrome, storefront, invoices, advance receipts, scrollbars, text selection, scrollbar, PWA install banner and the browser/mobile theme colour
+- Derived shades (`--accent-strong`, `--accent-soft`, `--accent-wash`) are computed automatically, so hover states and tints stay readable on light *and* dark accents
+- Text placed on the accent automatically flips white or near-black based on WCAG contrast, so pale colours never produce unreadable buttons
+- Printed invoices keep the brand colour via `print-color-adjust: exact`
+- Stored in `shop_settings.accent_color`; the column is added automatically to existing databases
+
 ### ⚙️ Shop Settings (Admin only)
 - Edit the shop profile used everywhere: owner name, shop name, tagline, phone, email, address, city, business hours, Instagram link and GSTIN
 - Upload or reset the **shop logo** (auto-resized to 512px and stored with the profile)
@@ -138,7 +147,7 @@ Open http://localhost:3000.
 
 ## Data Model
 
-- **shop_settings** — single row (`id = 'default'`) holding the shop profile: owner name, shop name, tagline, phone, email, address, city, business hours, Instagram link, GSTIN and the uploaded logo (stored as a data URL).
+- **shop_settings** — single row (`id = 'default'`) holding the shop profile: owner name, shop name, tagline, phone, email, address, city, business hours, Instagram link, GSTIN, the uploaded logo (stored as a data URL) and `accent_color` (the app-wide theme colour).
 - **products** — the catalogue. Rows are either `PRODUCT` (physical, stock-tracked) or `SERVICE` (non-stocked add-ons). Each row carries `selling_price`, `cost_price`, `gst_rate`, `hsn_code`, `current_stock` / `low_stock_alert` (NULL for services), `offer_discount_pct` / `offer_price` and `is_active`.
 - **order_items** — invoice lines, snapshotting name, price, quantity and the `offer_pct` that was applied.
 - **customers**, **orders**, **order_items** — sales records. `orders.is_gst` flags GST invoices vs non-GST bills, which powers the two revenue dashboards.

@@ -1,4 +1,4 @@
-import { getShopSettings, shopLogoSrc } from "@/lib/shopSettings";
+import { getShopSettings, shopLogoSrc, normalizeHex, DEFAULT_ACCENT } from "@/lib/shopSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,7 @@ export async function GET() {
     start_url: "/pos/admin/secure/control-panel/ss-creatives",
     display: "standalone",
     background_color: "#FFFFFF",
-    theme_color: "#35617C",
+    theme_color: normalizeHex(shop.accent_color) || DEFAULT_ACCENT,
     orientation: "any",
     scope: "/",
     icons: [

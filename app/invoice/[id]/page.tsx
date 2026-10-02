@@ -302,9 +302,9 @@ export default async function InvoicePage({
       ) : (
         <div className="invoice-sheet w-full max-w-[760px] bg-white border border-zinc-200/80 shadow-xs rounded-sm p-6 sm:p-12 text-zinc-900 print:border-none print:shadow-none print:p-0 print:rounded-none">
         {/* Header: Company & Invoice Info */}
-        <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pb-6 border-b border-zinc-200">
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pb-6 border-b-2 border-[var(--accent)]">
           <div className="flex items-start gap-3.5 sm:gap-4">
-            <div className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-sm border border-zinc-200 overflow-hidden bg-white p-1">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-sm border border-[var(--accent)]/30 overflow-hidden bg-white p-1">
               <img
                 src={shopLogo}
                 alt={shop.shop_name}
@@ -312,7 +312,7 @@ export default async function InvoicePage({
               />
             </div>
             <div className="space-y-1">
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--accent)]">
                 {shop.shop_name}
               </h1>
               {shop.address && (
@@ -334,7 +334,7 @@ export default async function InvoicePage({
 
           <div className="sm:text-right space-y-1.5 shrink-0">
             <div>
-              <span className="text-lg font-bold tracking-tight text-zinc-900 uppercase">
+              <span className="text-lg font-bold tracking-tight text-[var(--accent)] uppercase">
                 {order.is_gst ? "Tax Invoice" : "Invoice"}
               </span>
               <p className="text-xs font-mono text-zinc-500">#{order.id}</p>
@@ -581,11 +581,11 @@ export default async function InvoicePage({
               </div>
             )}
 
-            <div className="border-t border-zinc-900 pt-2.5 mt-2 flex justify-between items-baseline">
-              <span className="text-sm font-bold text-zinc-900 uppercase">
+            <div className="border-t-2 border-[var(--accent)] pt-2.5 mt-2 flex justify-between items-baseline">
+              <span className="text-sm font-bold text-[var(--accent)] uppercase">
                 Total
               </span>
-              <span className="font-mono text-lg font-bold text-zinc-900">
+              <span className="font-mono text-lg font-bold text-[var(--accent)]">
                 ₹{grandTotalNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
@@ -593,7 +593,7 @@ export default async function InvoicePage({
         </div>
 
         {/* Signatory & Machine Note */}
-        <div className="mt-12 pt-6 border-t border-zinc-200 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6 text-xs">
+        <div className="mt-12 pt-6 border-t border-[var(--accent)]/30 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6 text-xs">
           <div className="text-[11px] text-zinc-400">
             Thank you for your visit! • {shop.shop_name} POS
           </div>

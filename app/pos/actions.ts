@@ -2,7 +2,7 @@
 
 import { dbStore } from "@/lib/dbStore";
 import { Product, OrderWithRelations, CartItem, Expense, PaymentMode, Category, AdvanceOrderWithRelations, AdvanceOrderStatus, ShopSettings, ItemType } from "@/lib/types";
-import { getShopSettings, saveShopSettings } from "@/lib/shopSettings";
+import { getShopSettings, saveShopSettings, normalizeHex, DEFAULT_ACCENT } from "@/lib/shopSettings";
 
 // Helper to serialize Date objects from Postgres to strings
 function serialize<T>(data: T): T {
@@ -205,6 +205,7 @@ export async function updateShopSettings(data: ShopSettings): Promise<ShopSettin
     business_hours: data.business_hours.trim(),
     services: data.services.trim(),
     gstin: data.gstin.trim(),
+    accent_color: normalizeHex(data.accent_color) || DEFAULT_ACCENT,
     logo_data_url: data.logo_data_url || null,
   };
   return serialize(await saveShopSettings(clean));

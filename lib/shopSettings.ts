@@ -1,9 +1,9 @@
 import { sql } from './db';
 import type { ShopSettings } from './types';
-import { DEFAULT_SHOP_SETTINGS } from './shopProfile';
+import { DEFAULT_SHOP_SETTINGS, DEFAULT_ACCENT, normalizeHex } from './shopProfile';
 
 // Re-exported so server modules can pull everything shop-related from one file.
-export { DEFAULT_SHOP_SETTINGS, shopLogoSrc, formatPhone } from './shopProfile';
+export { DEFAULT_SHOP_SETTINGS, shopLogoSrc, formatPhone, DEFAULT_ACCENT, ACCENT_PRESETS, accentCssVars, isLightColor, normalizeHex } from './shopProfile';
 
 /** Single-row key so the profile is a singleton. */
 const SETTINGS_ID = 'default';
@@ -32,6 +32,8 @@ async function ensureSchema(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `;
+    // Idempotent migration for databases created before theming existed.
+    await sql`ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS accent_color TEXT NOT NULL DEFAULT '#31042F'`;
     schemaChecked = true;
   } catch (err) {
     console.error('Failed to ensure shop_settings table:', err);
@@ -50,6 +52,7 @@ const toSettings = (row: Record<string, unknown>): ShopSettings => ({
   business_hours: (row.business_hours as string) || DEFAULT_SHOP_SETTINGS.business_hours,
   services: (row.services as string) || DEFAULT_SHOP_SETTINGS.services,
   gstin: (row.gstin as string) || DEFAULT_SHOP_SETTINGS.gstin,
+  accent_color: normalizeHex((row.accent_color as string) || '') || DEFAULT_SHOP_SETTINGS.accent_color,
   logo_data_url: (row.logo_data_url as string) || null,
   updated_at: row.updated_at ? String(row.updated_at) : undefined,
 });
@@ -65,13 +68,13 @@ export async function getShopSettings(): Promise<ShopSettings> {
 
     if (!rows || rows.length === 0) {
       const seeded = (await sql`
-        INSERT INTO shop_settings (id, owner_name, shop_name, tagline, phone, email, address, location, instagram_url, business_hours, services, gstin, logo_data_url)
+        INSERT INTO shop_settings (id, owner_name, shop_name, tagline, phone, email, address, location, instagram_url, business_hours, services, gstin, logo_data_url, accent_color)
         VALUES (
           ${SETTINGS_ID}, ${DEFAULT_SHOP_SETTINGS.owner_name}, ${DEFAULT_SHOP_SETTINGS.shop_name},
           ${DEFAULT_SHOP_SETTINGS.tagline}, ${DEFAULT_SHOP_SETTINGS.phone}, ${DEFAULT_SHOP_SETTINGS.email},
           ${DEFAULT_SHOP_SETTINGS.address}, ${DEFAULT_SHOP_SETTINGS.location}, ${DEFAULT_SHOP_SETTINGS.instagram_url},
           ${DEFAULT_SHOP_SETTINGS.business_hours}, ${DEFAULT_SHOP_SETTINGS.services}, ${DEFAULT_SHOP_SETTINGS.gstin},
-          ${DEFAULT_SHOP_SETTINGS.logo_data_url}
+          ${DEFAULT_SHOP_SETTINGS.logo_data_url}, ${DEFAULT_ACCENT}
         )
         ON CONFLICT (id) DO NOTHING
         RETURNING *
@@ -92,13 +95,13 @@ export async function saveShopSettings(input: ShopSettings): Promise<ShopSetting
   const rows = (await sql`
     INSERT INTO shop_settings (
       id, owner_name, shop_name, tagline, phone, email, address, location,
-      instagram_url, business_hours, services, gstin, logo_data_url, updated_at
+      instagram_url, business_hours, services, gstin, logo_data_url, updated_at, accent_color
     )
     VALUES (
       ${SETTINGS_ID}, ${input.owner_name}, ${input.shop_name}, ${input.tagline},
       ${input.phone}, ${input.email}, ${input.address}, ${input.location},
       ${input.instagram_url}, ${input.business_hours}, ${input.services}, ${input.gstin},
-      ${input.logo_data_url}, now()
+      ${input.logo_data_url}, now(), ${input.accent_color}
     )
     ON CONFLICT (id) DO UPDATE SET
       owner_name = EXCLUDED.owner_name,
@@ -113,6 +116,7 @@ export async function saveShopSettings(input: ShopSettings): Promise<ShopSetting
       services = EXCLUDED.services,
       gstin = EXCLUDED.gstin,
       logo_data_url = EXCLUDED.logo_data_url,
+      accent_color = EXCLUDED.accent_color,
       updated_at = now()
     RETURNING *
   `) as Record<string, unknown>[];

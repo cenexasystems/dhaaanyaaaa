@@ -169,13 +169,14 @@ CREATE TABLE IF NOT EXISTS shop_settings (
   business_hours TEXT NOT NULL DEFAULT '',
   services       TEXT NOT NULL DEFAULT '',
   gstin          TEXT NOT NULL DEFAULT '',
+  accent_color   TEXT NOT NULL DEFAULT '#31042F',
   logo_data_url  TEXT,
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 INSERT INTO shop_settings (
   id, owner_name, shop_name, tagline, phone, email,
-  address, location, instagram_url, business_hours, services, gstin, logo_data_url
+  address, location, instagram_url, business_hours, services, gstin, logo_data_url, accent_color
 ) VALUES (
   'default',
   'Ananthi M',
@@ -189,7 +190,8 @@ INSERT INTO shop_settings (
   'Open Daily',
   'Custom Tailoring • Designer Blouses & Dresses • Alterations & Fittings • Embroidery & Aari Work • Boutique Wear',
   '',
-  NULL
+  NULL,
+  '#31042F'
 )
 ON CONFLICT (id) DO NOTHING;
 

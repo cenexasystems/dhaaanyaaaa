@@ -22,6 +22,7 @@ import {
   AlertCircle,
   Package,
   Pencil,
+  Palette,
 } from "lucide-react";
 import type { Category, Product, ShopSettings, ItemType } from "@/lib/types";
 import {
@@ -31,6 +32,14 @@ import {
   removeProduct,
   updateShopSettings,
 } from "@/app/pos/actions";
+
+import {
+  ACCENT_PRESETS,
+  DEFAULT_ACCENT,
+  accentCssVars,
+  isLightColor,
+  normalizeHex,
+} from "@/lib/shopProfile";
 
 const MAX_LOGO_EDGE = 512;
 
@@ -44,7 +53,7 @@ interface SettingsPanelProps {
 }
 
 const inputCls =
-  "w-full bg-white border border-[#000000]/15 rounded-lg px-3 py-2.5 text-sm font-semibold text-[#000000] placeholder:text-[#000000]/30 focus:outline-none focus:border-[#35617C] focus:ring-2 focus:ring-[#35617C]/20 transition-colors";
+  "w-full bg-white border border-[#000000]/15 rounded-lg px-3 py-2.5 text-sm font-semibold text-[#000000] placeholder:text-[#000000]/30 focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-colors";
 
 const labelCls =
   "block text-[10px] font-extrabold uppercase tracking-widest text-[#000000]/50 mb-1.5";
@@ -176,6 +185,123 @@ function TextAreaField({
   );
 }
 
+/* ── Accent colour picker ───────────────────────────────────────── */
+
+/**
+ * Picks the single accent colour used across the entire app. Selecting a swatch
+ * applies the derived CSS variables to <html> immediately (live preview) so the
+ * admin sees the whole POS — and any open invoice tab — repaint before saving.
+ */
+function ThemePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (hex: string) => void;
+}) {
+  const current = normalizeHex(value) || DEFAULT_ACCENT;
+  const [custom, setCustom] = React.useState(current);
+
+  // Keep the hex box in sync when a preset is chosen.
+  React.useEffect(() => {
+    setCustom(current);
+  }, [current]);
+
+  const previewVars = accentCssVars(current) as React.CSSProperties;
+
+  const commitCustom = (raw: string) => {
+    setCustom(raw);
+    const normalized = normalizeHex(raw);
+    if (normalized) onChange(normalized);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {ACCENT_PRESETS.map((preset) => {
+          const active = normalizeHex(preset) === current;
+          return (
+            <button
+              key={preset}
+              type="button"
+              title={preset}
+              aria-label={`Use accent ${preset}`}
+              aria-pressed={active}
+              onClick={() => onChange(preset)}
+              style={{ backgroundColor: preset }}
+              className={`w-7 h-7 rounded-md transition-transform cursor-pointer ${
+                active
+                  ? "ring-2 ring-offset-2 ring-[var(--accent)] scale-110"
+                  : "hover:scale-110"
+              }`}
+            />
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label
+          className="relative w-11 h-9 rounded-lg overflow-hidden border border-[#000000]/15 cursor-pointer shrink-0"
+          style={{ backgroundColor: current }}
+          title="Pick a custom colour"
+        >
+          <input
+            type="color"
+            value={current}
+            onChange={(e) => onChange(e.target.value.toUpperCase())}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            aria-label="Custom accent colour"
+          />
+        </label>
+        <input
+          value={custom}
+          onChange={(e) => commitCustom(e.target.value)}
+          placeholder="#31042F"
+          spellCheck={false}
+          className="w-32 bg-white border border-[#000000]/15 rounded-lg px-3 py-2 text-sm font-mono font-semibold text-[#000000] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-colors"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(DEFAULT_ACCENT)}
+          className="text-[10px] font-extrabold uppercase tracking-wider text-[#000000]/50 hover:text-[var(--accent)] underline underline-offset-2 cursor-pointer transition-colors"
+        >
+          Reset
+        </button>
+      </div>
+
+      {/* Live preview card */}
+      <div
+        style={previewVars}
+        className="mt-4 rounded-xl overflow-hidden border border-[#000000]/10"
+      >
+        <div className="p-4 text-center" style={{ backgroundColor: current, color: isLightColor(current) ? "#1C1917" : "#FFFFFF" }}>
+          <p className="text-sm font-black uppercase tracking-tight">Card Preview</p>
+          <p className="text-[10px] font-semibold opacity-80 mt-0.5">
+            Buttons, links, totals and invoice headers use this colour.
+          </p>
+        </div>
+        <div className="bg-white p-3 flex items-center gap-2">
+          <span
+            className="px-3 py-1.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider"
+            style={{ backgroundColor: current, color: isLightColor(current) ? "#1C1917" : "#FFFFFF" }}
+          >
+            Button
+          </span>
+          <span className="text-[10px] font-bold" style={{ color: current }}>
+            Accent link
+          </span>
+          <span
+            className="ml-auto text-[10px] font-extrabold px-2.5 py-1 rounded-md"
+            style={{ backgroundColor: `color-mix(in srgb, ${current} 14%, #FFFFFF)`, color: current }}
+          >
+            Total ₹1,250
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPanel({
   shop,
   products,
@@ -193,6 +319,20 @@ export default function SettingsPanel({
     setForm((prev) => ({ ...prev, [key]: value }));
     setStatus(null);
   };
+
+  /**
+   * Live theme preview: write the derived accent variables onto <html> the moment
+   * a colour is picked, so the admin sees the entire POS repaint instantly. The
+   * persisted value only changes on Save.
+   */
+  React.useEffect(() => {
+    const root = document.documentElement;
+    const vars = accentCssVars(form.accent_color);
+    Object.entries(vars).forEach(([key, value]) => root.style.setProperty(key, value));
+    return () => {
+      Object.keys(vars).forEach((key) => root.style.removeProperty(key));
+    };
+  }, [form.accent_color]);
 
   const handleLogoPick = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -237,7 +377,7 @@ export default function SettingsPanel({
   return (
     <div className="flex-1 flex flex-col max-w-[1400px] mx-auto w-full pb-8 pr-2 animate-in fade-in duration-300 gap-6">
       <div className="bg-[#FFFFFF] border border-[#000000]/10 rounded-2xl px-5 py-4 flex items-center gap-3 shadow-sm">
-        <div className="w-9 h-9 rounded-xl bg-[#35617C] text-white flex items-center justify-center shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-white flex items-center justify-center shrink-0">
           <Settings2 className="w-5 h-5" />
         </div>
         <div>
@@ -252,9 +392,24 @@ export default function SettingsPanel({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+        {/* Appearance / theme */}
+        <div className="bg-[#FFFFFF] border border-[#000000]/10 rounded-2xl p-5 sm:p-6 shadow-sm">
+          <h3 className="text-xs font-black uppercase tracking-widest text-[var(--accent)] flex items-center gap-2 mb-1">
+            <Palette className="w-4 h-4" /> Appearance
+          </h3>
+          <p className="text-[10px] text-[#000000]/50 font-semibold mb-5">
+            One accent colour drives the whole app — POS, storefront, invoices,
+            receipts and the installed app.
+          </p>
+          <ThemePicker
+            value={form.accent_color}
+            onChange={(v) => setField("accent_color", v)}
+          />
+        </div>
+
         {/* ── Shop profile ─────────────────────────────────────────── */}
         <div className="bg-[#FFFFFF] border border-[#000000]/10 rounded-2xl p-5 sm:p-6 shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-widest text-[#35617C] flex items-center gap-2 mb-5">
+          <h3 className="text-xs font-black uppercase tracking-widest text-[var(--accent)] flex items-center gap-2 mb-5">
             <Store className="w-4 h-4" /> Shop Profile
           </h3>
 
@@ -359,7 +514,7 @@ export default function SettingsPanel({
               <ImageIcon className="w-3.5 h-3.5" /> Shop Logo
             </p>
             <div className="flex items-center gap-4">
-              <div className="w-20 h-20 rounded-2xl bg-white border border-[#35617C]/30 shadow-sm flex items-center justify-center p-2 shrink-0">
+              <div className="w-20 h-20 rounded-2xl bg-white border border-[var(--accent)]/30 shadow-sm flex items-center justify-center p-2 shrink-0">
                 <img
                   src={logoPreview}
                   alt="Shop logo preview"
@@ -371,7 +526,7 @@ export default function SettingsPanel({
                   <button
                     type="button"
                     onClick={() => logoInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 bg-[#35617C] hover:bg-[#2C4E64] text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-2 rounded-lg cursor-pointer transition-colors"
+                    className="inline-flex items-center gap-1.5 bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-2 rounded-lg cursor-pointer transition-colors"
                   >
                     <Upload className="w-3.5 h-3.5" /> Upload Logo
                   </button>
@@ -604,13 +759,13 @@ function CatalogueEditor({
   return (
     <div className="bg-[#FFFFFF] border border-[#000000]/10 rounded-2xl p-5 sm:p-6 shadow-sm">
       <div className="flex items-start justify-between gap-3 mb-5">
-        <h3 className="text-xs font-black uppercase tracking-widest text-[#35617C] flex items-center gap-2">
+        <h3 className="text-xs font-black uppercase tracking-widest text-[var(--accent)] flex items-center gap-2">
           <Package className="w-4 h-4" /> Product Catalogue
         </h3>
         <button
           type="button"
           onClick={onOpenInventory}
-          className="text-[9px] font-extrabold uppercase tracking-widest text-[#35617C] hover:underline underline-offset-2 cursor-pointer shrink-0"
+          className="text-[9px] font-extrabold uppercase tracking-widest text-[var(--accent)] hover:underline underline-offset-2 cursor-pointer shrink-0"
         >
           Full inventory view
         </button>
@@ -628,7 +783,7 @@ function CatalogueEditor({
           {categories.map((c) => (
             <span
               key={c.id}
-              className="inline-flex items-center bg-[#35617C]/10 border border-[#35617C]/25 text-[#35617C] text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full"
+              className="inline-flex items-center bg-[var(--accent)]/10 border border-[var(--accent)]/25 text-[var(--accent)] text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full"
             >
               {c.name}
             </span>
@@ -663,7 +818,7 @@ function CatalogueEditor({
             onClick={() => setDraft({ ...draft, type: "PRODUCT" })}
             className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-colors cursor-pointer border ${
               draft.type === "PRODUCT"
-                ? "bg-[#35617C] text-white border-[#35617C]"
+                ? "bg-[var(--accent)] text-white border-[var(--accent)]"
                 : "bg-white text-[#000000]/60 border-[#000000]/15 hover:border-[#000000]/30"
             }`}
           >
@@ -674,7 +829,7 @@ function CatalogueEditor({
             onClick={() => setDraft({ ...draft, type: "SERVICE" })}
             className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-colors cursor-pointer border ${
               draft.type === "SERVICE"
-                ? "bg-[#7C5A52] text-white border-[#7C5A52]"
+                ? "bg-[var(--accent-strong)] text-white border-[var(--accent-strong)]"
                 : "bg-white text-[#000000]/60 border-[#000000]/15 hover:border-[#000000]/30"
             }`}
           >
@@ -756,7 +911,7 @@ function CatalogueEditor({
             type="button"
             onClick={handleAdd}
             disabled={isBusy}
-            className="sm:col-span-6 inline-flex items-center justify-center gap-1.5 bg-[#35617C] hover:bg-[#2C4E64] disabled:opacity-50 text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-2.5 rounded-lg cursor-pointer transition-colors"
+            className="sm:col-span-6 inline-flex items-center justify-center gap-1.5 bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:opacity-50 text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-2.5 rounded-lg cursor-pointer transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             {draft.type === "SERVICE" ? "Add Service" : "Add to catalogue"}
@@ -775,7 +930,7 @@ function CatalogueEditor({
           editing === p.id ? (
             <div
               key={p.id}
-              className="border border-[#35617C]/40 bg-[#35617C]/5 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-6 gap-2"
+              className="border border-[var(--accent)]/40 bg-[var(--accent)]/5 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-6 gap-2"
             >
               <input
                 className={`${inputCls} sm:col-span-2`}
@@ -828,13 +983,13 @@ function CatalogueEditor({
           ) : (
             <div
               key={p.id}
-              className="flex items-center gap-3 border border-[#000000]/10 rounded-xl px-3 py-2.5 hover:border-[#35617C]/40 transition-colors"
+              className="flex items-center gap-3 border border-[#000000]/10 rounded-xl px-3 py-2.5 hover:border-[var(--accent)]/40 transition-colors"
             >
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-extrabold text-[#000000] truncate flex items-center gap-1.5">
                   {p.name}
                   {p.item_type === "SERVICE" && (
-                    <span className="text-[8px] font-black uppercase tracking-widest text-[#7C5A52] bg-[#7C5A52]/10 border border-[#7C5A52]/25 px-1.5 py-0.5 rounded shrink-0">
+                    <span className="text-[8px] font-black uppercase tracking-widest text-[var(--accent-strong)] bg-[var(--accent-strong)]/10 border border-[var(--accent-strong)]/25 px-1.5 py-0.5 rounded shrink-0">
                       Service
                     </span>
                   )}
@@ -876,7 +1031,7 @@ function CatalogueEditor({
                 type="button"
                 onClick={() => startEdit(p)}
                 title="Edit item"
-                className="text-[#000000]/40 hover:text-[#35617C] cursor-pointer"
+                className="text-[#000000]/40 hover:text-[var(--accent)] cursor-pointer"
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
