@@ -115,7 +115,7 @@ npm run dev
 Open http://localhost:3000.
 
 - Public store page: `/`
-- POS terminal: `/pos/admin/secure/control-panel/ss-creatives`
+- POS terminal: `/pos`
 - Digital invoice: `/invoice/[invoice-id]`
 
 ## Deploying to Vercel

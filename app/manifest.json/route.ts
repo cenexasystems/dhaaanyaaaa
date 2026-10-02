@@ -21,7 +21,7 @@ export async function GET() {
     name: `${shop.shop_name} - POS`,
     short_name: shop.shop_name,
     description: `${shop.shop_name} Point of Sale, Billing & Inventory Management`,
-    start_url: "/pos/admin/secure/control-panel/ss-creatives",
+    start_url: "/pos",
     display: "standalone",
     background_color: "#FFFFFF",
     theme_color: normalizeHex(shop.accent_color) || DEFAULT_ACCENT,

@@ -1,11 +1,13 @@
-const CACHE_NAME = 'dhanyas-boutique-pos-v1';
+// Bumped to v2 when the POS moved from /pos/admin/secure/control-panel/ss-creatives
+// to /pos, so installed PWA clients drop their cached copy of the old route.
+const CACHE_NAME = 'dhanyas-boutique-pos-v2';
 const ASSETS_TO_CACHE = [
   '/store',
   '/manifest.json',
   '/logo.svg',
   '/logo.png',
   '/icon.png',
-  '/pos/admin/secure/control-panel/ss-creatives'
+  '/pos'
 ];
 
 self.addEventListener('install', (event) => {

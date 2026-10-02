@@ -34,7 +34,7 @@ export default async function AdvanceReceiptPage({
           The requested advance order #{id} could not be found.
         </p>
         <Link
-          href="/pos/admin/secure/control-panel/ss-creatives"
+          href="/pos"
           className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 rounded-md text-white font-medium text-xs transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
