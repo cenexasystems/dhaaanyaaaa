@@ -2373,7 +2373,7 @@ export default function POSBilling() {
           {/* Logo with Gradient Hover Glow */}
           <div className="relative group mb-6">
             <div className="absolute -inset-1.5 bg-gradient-to-r from-[var(--accent)] to-[var(--accent)] rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative w-20 h-20 bg-white rounded-2xl p-3.5 border border-[var(--accent)]/30 shadow-lg flex items-center justify-center">
+            <div className="relative w-24 h-24 bg-white rounded-2xl border border-[var(--accent)]/30 shadow-lg overflow-hidden flex items-center justify-center">
               <img
                 src={shopSettings.logo_data_url || "/logo.svg"}
                 alt={`${shopSettings.shop_name} Logo`}
