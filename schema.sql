@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS orders (
                    CHECK (status IN ('COMPLETED', 'PENDING')),
   is_gst           BOOLEAN NOT NULL DEFAULT FALSE,
 
-  -- money values are GST-inclusive unless stated otherwise
+  -- subtotal is GST-exclusive; grand_total = subtotal - discount + gst_amount + delivery_fee
   subtotal         NUMERIC NOT NULL DEFAULT 0,
   discount_type    TEXT NOT NULL DEFAULT 'FIXED'
                    CHECK (discount_type IN ('PERCENT', 'FIXED')),
