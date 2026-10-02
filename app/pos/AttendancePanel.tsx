@@ -5,8 +5,6 @@ import {
   CalendarDays,
   Download,
   Loader2,
-  LogIn,
-  LogOut,
   Pencil,
   Plus,
   Save,
@@ -17,8 +15,6 @@ import {
 } from "lucide-react";
 import type { AttendanceRecord, AttendanceStatus, Staff } from "@/lib/types";
 import {
-  clockInStaff,
-  clockOutStaff,
   createStaff,
   editStaff,
   fetchAttendance,
@@ -169,6 +165,14 @@ function TodayAttendance({ staff, onAddStaff }: { staff: Staff[]; onAddStaff: ()
 
   const activeStaff = useMemo(() => staff.filter((s) => s.is_active), [staff]);
   const isToday = date === todayIST();
+  // Staff punch in/out from their own login; poll today's view so those
+  // punches show up here without a manual refresh.
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    if (!isToday) return;
+    const timer = window.setInterval(() => setRefreshTick((t) => t + 1), 30000);
+    return () => window.clearInterval(timer);
+  }, [isToday]);
   const isLoading = loaded?.date !== date;
   const records = useMemo(
     () => (loaded?.date === date ? loaded.records : []),
@@ -188,7 +192,7 @@ function TodayAttendance({ staff, onAddStaff }: { staff: Staff[]; onAddStaff: ()
     return () => {
       cancelled = true;
     };
-  }, [date]);
+  }, [date, refreshTick]);
 
   const byStaff = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
@@ -310,15 +314,6 @@ function TodayAttendance({ staff, onAddStaff }: { staff: Staff[]; onAddStaff: ()
                     <td className="px-5 py-3.5 text-sm font-semibold text-[#000000]">
                       {record?.clock_in ? (
                         formatTime(record.clock_in)
-                      ) : isToday ? (
-                        <button
-                          type="button"
-                          disabled={isBusy || isLoading}
-                          onClick={() => run(s.id, () => clockInStaff(s.id, date))}
-                          className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#15803D] border border-[#15803D]/30 bg-[#15803D]/5 hover:bg-[#15803D]/10 disabled:opacity-50 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
-                        >
-                          <LogIn className="w-3.5 h-3.5" /> Clock In
-                        </button>
                       ) : (
                         <span className="text-[#000000]/40">—</span>
                       )}
@@ -326,15 +321,10 @@ function TodayAttendance({ staff, onAddStaff }: { staff: Staff[]; onAddStaff: ()
                     <td className="px-5 py-3.5 text-sm font-semibold text-[#000000]">
                       {record?.clock_out ? (
                         formatTime(record.clock_out)
-                      ) : isToday && record?.clock_in ? (
-                        <button
-                          type="button"
-                          disabled={isBusy || isLoading}
-                          onClick={() => run(s.id, () => clockOutStaff(s.id, date))}
-                          className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#DC2626] border border-[#DC2626]/30 bg-[#DC2626]/5 hover:bg-[#DC2626]/10 disabled:opacity-50 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
-                        >
-                          <LogOut className="w-3.5 h-3.5" /> Clock Out
-                        </button>
+                      ) : record?.clock_in && isToday ? (
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#15803D]">
+                          On shift
+                        </span>
                       ) : (
                         <span className="text-[#000000]/40">—</span>
                       )}
@@ -442,6 +432,11 @@ function MonthlyReport({ staff }: { staff: Staff[] }) {
       cancelled = true;
     };
   }, [range]);
+
+  // A complete, valid From–To range applies as soon as it is picked.
+  const applyCustomRange = (from: string, to: string) => {
+    if (from && to && from <= to) setRange({ from, to });
+  };
 
   const applyFilter = () => {
     if (fromDate || toDate) {
@@ -570,6 +565,7 @@ function MonthlyReport({ staff }: { staff: Staff[] }) {
                 setMonth(e.target.value);
                 setFromDate("");
                 setToDate("");
+                setRange(monthRange(e.target.value));
               }}
               className="text-sm font-bold text-[#000000] bg-transparent focus:outline-none cursor-pointer"
             />
@@ -581,7 +577,11 @@ function MonthlyReport({ staff }: { staff: Staff[] }) {
             <input
               type="date"
               value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
+              max={toDate || undefined}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                applyCustomRange(e.target.value, toDate);
+              }}
               className="text-sm font-bold text-[#000000] bg-transparent focus:outline-none cursor-pointer"
             />
           </label>
@@ -592,7 +592,11 @@ function MonthlyReport({ staff }: { staff: Staff[] }) {
             <input
               type="date"
               value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
+              min={fromDate || undefined}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                applyCustomRange(fromDate, e.target.value);
+              }}
               className="text-sm font-bold text-[#000000] bg-transparent focus:outline-none cursor-pointer"
             />
           </label>
