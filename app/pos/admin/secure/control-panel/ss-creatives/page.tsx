@@ -3079,18 +3079,18 @@ export default function POSBilling() {
 
       {/* Collapsible Left Sidebar */}
       <aside
-        className={`fixed lg:sticky top-0 bottom-0 left-0 bg-gradient-to-b from-[var(--accent)] via-[#2C5069] to-[#1F3B4D] text-[#FFFFFF] flex flex-col justify-between h-screen shrink-0 shadow-2xl z-40 transition-all duration-300 ease-in-out ${isSidebarOpen ? "w-64 border-r border-white/20 translate-x-0" : "w-0 min-w-0 border-r-0 -translate-x-64 overflow-hidden"}`}
+        className={`fixed lg:sticky top-0 bottom-0 left-0 bg-gradient-to-b from-[var(--accent)] via-[var(--accent-strong)] to-[color-mix(in_srgb,var(--accent)_55%,#000000)] text-[#FFFFFF] flex flex-col justify-between h-screen shrink-0 shadow-2xl z-40 transition-all duration-300 ease-in-out ${isSidebarOpen ? "w-64 border-r border-white/20 translate-x-0" : "w-0 min-w-0 border-r-0 -translate-x-64 overflow-hidden"}`}
       >
         <div className="w-64 flex flex-col justify-between h-full shrink-0 overflow-hidden relative">
           <div className="flex flex-col">
             {/* Header branding */}
             <div className="p-6 border-b border-white/20 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-[#FFFFFF] rounded-xl flex items-center justify-center shadow-md overflow-hidden shrink-0">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-md overflow-hidden shrink-0 border border-white/25">
                   <img
                     src={shopSettings.logo_data_url || "/logo.svg"}
                     alt={`${shopSettings.shop_name} Logo`}
-                    className="w-full h-full object-contain p-1"
+                    className="w-full h-full object-contain"
                   />
                 </div>
                 <div>
@@ -6643,7 +6643,7 @@ export default function POSBilling() {
 
             {/* Summary cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div className="rounded-2xl p-5 shadow-sm text-white bg-gradient-to-br from-[var(--accent)] to-[#18181B]">
+              <div className="rounded-2xl p-5 shadow-sm text-white bg-gradient-to-br from-[var(--accent)] to-[color-mix(in_srgb,var(--accent)_55%,#000000)]">
                 <div className="flex justify-between items-start mb-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-white/90">
                     Total Expenses
