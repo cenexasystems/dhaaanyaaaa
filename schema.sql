@@ -196,14 +196,16 @@ INSERT INTO shop_settings (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Starter categories (drop this block for a blank slate) -----------------
-INSERT INTO categories (id, name) VALUES
-  (gen_random_uuid()::text, 'Blouses'),
-  (gen_random_uuid()::text, 'Sarees'),
-  (gen_random_uuid()::text, 'Kurtis'),
-  (gen_random_uuid()::text, 'Alterations'),
-  (gen_random_uuid()::text, 'Services')
-ON CONFLICT (name) DO NOTHING;
+-- Starter categories ----------------------------------------------------
+-- Removed to give a blank slate. Add your own from the POS category
+-- manager (Sidebar -> Categories). Products fall back to 'General'.
+-- INSERT INTO categories (id, name) VALUES
+--   (gen_random_uuid()::text, 'Blouses'),
+--   (gen_random_uuid()::text, 'Sarees'),
+--   (gen_random_uuid()::text, 'Kurtis'),
+--   (gen_random_uuid()::text, 'Alterations'),
+--   (gen_random_uuid()::text, 'Services')
+-- ON CONFLICT (name) DO NOTHING;
 
 -- =====================================================================
 --  UPGRADE BLOCK - run these on an EXISTING database
