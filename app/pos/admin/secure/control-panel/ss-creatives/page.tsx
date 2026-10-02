@@ -51,6 +51,11 @@ import {
   MessageSquare,
   Settings2,
   Scissors,
+  SlidersHorizontal,
+  Undo2,
+  Target,
+  CheckCircle2,
+  Minus,
 } from "lucide-react";
 import {
   verifyPasscode,
@@ -728,6 +733,80 @@ export default function POSBilling() {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editCategoryName, setEditCategoryName] = useState("");
   const [isSavingCategory, setIsSavingCategory] = useState(false);
+
+  // ── Stock adjustment (restock / return / loss / reconcile) ───────────────
+  type StockAdjustType = "RESTOCK" | "RETURN" | "LOSS" | "RECONCILE";
+  const [stockAdjustTarget, setStockAdjustTarget] = useState<CatalogItem | null>(null);
+  const [stockAdjustType, setStockAdjustType] = useState<StockAdjustType>("RESTOCK");
+  const [stockAdjustQty, setStockAdjustQty] = useState<number>(0);
+  const [stockAdjustNote, setStockAdjustNote] = useState("");
+  const [isSavingStock, setIsSavingStock] = useState(false);
+
+  const openStockAdjust = (item: CatalogItem) => {
+    setStockAdjustTarget(item);
+    setStockAdjustType("RESTOCK");
+    setStockAdjustQty(0);
+    setStockAdjustNote("");
+  };
+
+  const closeStockAdjust = () => {
+    if (isSavingStock) return;
+    setStockAdjustTarget(null);
+  };
+
+  // Where the count lands after this adjustment.
+  const stockAdjustPreview = (() => {
+    if (!stockAdjustTarget) return 0;
+    const current = stockAdjustTarget.stock ?? 0;
+    const qty = Math.max(0, Number(stockAdjustQty) || 0);
+    switch (stockAdjustType) {
+      case "RESTOCK":
+      case "RETURN":
+        return current + qty;
+      case "LOSS":
+        return Math.max(0, current - qty);
+      case "RECONCILE":
+        return qty;
+    }
+  })();
+
+  const stockAdjustDelta = stockAdjustPreview - (stockAdjustTarget?.stock ?? 0);
+
+  const saveStockAdjustment = async () => {
+    if (!stockAdjustTarget || isSavingStock) return;
+    const target = stockAdjustTarget;
+    const qty = Math.max(0, Number(stockAdjustQty) || 0);
+
+    if (stockAdjustType !== "RECONCILE" && qty === 0) {
+      alert("Enter a quantity greater than 0.");
+      return;
+    }
+    if (stockAdjustType === "LOSS" && qty > (target.stock ?? 0)) {
+      const proceed = window.confirm(
+        `Only ${target.stock ?? 0} in stock. Deducting ${qty} will set stock to 0. Continue?`,
+      );
+      if (!proceed) return;
+    }
+
+    setIsSavingStock(true);
+    try {
+      await editProduct(target.id, {
+        current_stock: stockAdjustPreview,
+        // Reconcile is an exact count, so align the low-stock warning with it too.
+        low_stock_alert:
+          stockAdjustType === "RECONCILE"
+            ? Math.min(target.lowStockAlert ?? 0, stockAdjustPreview)
+            : target.lowStockAlert ?? undefined,
+      });
+      await fetchData();
+      setStockAdjustTarget(null);
+    } catch (err) {
+      console.error("Failed to adjust stock:", err);
+      alert("Could not update stock. Please try again.");
+    } finally {
+      setIsSavingStock(false);
+    }
+  };
 
   // Advance-order receipt modal (shown after creating an advance order)
   const [advanceReceipt, setAdvanceReceipt] = useState<{
@@ -2610,6 +2689,267 @@ export default function POSBilling() {
 
   return (
     <div className="min-h-screen bg-[#FFFFFF] text-[#000000] flex flex-row font-sans overflow-hidden">
+      {/* Stock Adjustment Modal — restock / return / loss / reconcile */}
+      {stockAdjustTarget && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4"
+          onClick={closeStockAdjust}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.3)] border border-black/10 w-full max-w-md overflow-hidden transform animate-in zoom-in-95 duration-200"
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 p-5 bg-[var(--accent)] text-white">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
+                  <SlidersHorizontal className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-black tracking-tight truncate">
+                    Adjust Inventory Stock
+                  </h3>
+                  <p className="text-[10px] font-semibold text-white/80">
+                    Restock, return, deduct loss, or reconcile count
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={closeStockAdjust}
+                disabled={isSavingStock}
+                className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+                aria-label="Close stock adjustment"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Target + current stock */}
+              <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-[var(--accent-wash)] border border-[var(--accent)]/25">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[var(--accent)] mb-0.5 flex items-center gap-1.5">
+                    <Package className="w-3 h-3" /> Target Item
+                  </p>
+                  <p className="text-sm font-bold text-black truncate">
+                    {stockAdjustTarget.name}
+                  </p>
+                  {stockAdjustTarget.hsnCode && (
+                    <p className="text-[10px] font-mono text-black/45 mt-0.5">
+                      HSN {stockAdjustTarget.hsnCode}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-black/45">
+                    Current Stock
+                  </p>
+                  <p className="text-lg font-black text-black leading-tight">
+                    {stockAdjustTarget.stock ?? 0}
+                    <span className="text-[10px] font-bold text-black/45 ml-1">
+                      units
+                    </span>
+                  </p>
+                </div>
+              </div>
+              {/* Adjustment type */}
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-black/50 mb-2">
+                  Select Adjustment Type <span className="text-red-500">*</span>
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(
+                    [
+                      { key: "RESTOCK", label: "Restock", sub: "+ Add", Icon: Plus, tone: "text-emerald-600" },
+                      { key: "RETURN", label: "Return", sub: "+ Add", Icon: Undo2, tone: "text-blue-600" },
+                      { key: "LOSS", label: "Loss / Dmg", sub: "− Deduct", Icon: Minus, tone: "text-red-600" },
+                      { key: "RECONCILE", label: "Reconcile", sub: "Exact Set", Icon: Target, tone: "text-amber-600" },
+                    ] as const
+                  ).map(({ key, label, sub, Icon, tone }) => {
+                    const active = stockAdjustType === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          setStockAdjustType(key);
+                          setStockAdjustQty(
+                            key === "RECONCILE" ? stockAdjustTarget.stock ?? 0 : 0,
+                          );
+                        }}
+                        className={`flex flex-col items-center justify-center gap-1 rounded-xl border px-2 py-3 transition-all cursor-pointer ${
+                          active
+                            ? "border-[var(--accent)] bg-[var(--accent-wash)] shadow-xs"
+                            : "border-black/10 bg-white hover:border-black/25"
+                        }`}
+                      >
+                        <span
+                          className={`w-7 h-7 rounded-full flex items-center justify-center border ${
+                            active
+                              ? "border-[var(--accent)]/40 bg-white"
+                              : "border-black/10 bg-black/[0.03]"
+                          }`}
+                        >
+                          <Icon
+                            className={`w-3.5 h-3.5 ${active ? "text-[var(--accent)]" : tone}`}
+                          />
+                        </span>
+                        <span className="text-[10px] font-black text-black leading-tight">
+                          {label}
+                        </span>
+                        <span
+                          className={`text-[9px] font-bold leading-tight ${
+                            sub.startsWith("+")
+                              ? "text-emerald-600"
+                              : sub.startsWith("−")
+                                ? "text-red-600"
+                                : "text-amber-600"
+                          }`}
+                        >
+                          {sub}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Quantity */}
+              <div
+                className={`rounded-xl border p-3.5 transition-colors ${
+                  stockAdjustType === "LOSS"
+                    ? "border-red-200 bg-red-50/40"
+                    : "border-[var(--accent)]/30 bg-[var(--accent-wash)]"
+                }`}
+              >
+                <p className="text-[9px] font-black uppercase tracking-widest text-black/50 mb-2.5">
+                  {stockAdjustType === "RECONCILE"
+                    ? "New Counted Quantity"
+                    : stockAdjustType === "LOSS"
+                      ? "Quantity to Deduct"
+                      : "Quantity to Add"}{" "}
+                  <span className="text-red-500">*</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStockAdjustQty((q) => Math.max(0, q - 1))}
+                    className="w-10 h-10 shrink-0 rounded-lg border border-black/15 bg-white hover:bg-black/5 flex items-center justify-center font-black text-lg cursor-pointer transition-colors"
+                    aria-label="Decrease quantity"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    value={stockAdjustQty}
+                    onChange={(e) =>
+                      setStockAdjustQty(Math.max(0, Number(e.target.value) || 0))
+                    }
+                    className="flex-1 min-w-0 text-center text-lg font-black text-black bg-white border border-black/15 rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setStockAdjustQty((q) => q + 1)}
+                    className="w-10 h-10 shrink-0 rounded-lg border border-black/15 bg-white hover:bg-black/5 flex items-center justify-center font-black text-lg cursor-pointer transition-colors"
+                    aria-label="Increase quantity"
+                  >
+                    +
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-black/45 mr-0.5">
+                    Quick:
+                  </span>
+                  {[1, 5, 10, 25, 50, 100].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() =>
+                        setStockAdjustQty((q) =>
+                          stockAdjustType === "RECONCILE" ? n : q + n,
+                        )
+                      }
+                      className="px-2 py-1 rounded-md border border-black/10 bg-white hover:border-[var(--accent)] hover:text-[var(--accent)] text-[10px] font-bold cursor-pointer transition-colors"
+                    >
+                      {stockAdjustType === "RECONCILE" ? n : `+${n}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Result preview */}
+              <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-wash)] text-[11px] font-bold">
+                <span className="text-black/55">
+                  Current:{" "}
+                  <span className="text-black font-black">
+                    {stockAdjustTarget.stock ?? 0}
+                  </span>
+                  <span className="mx-1.5">→</span>
+                  New Stock:{" "}
+                  <span className="text-[var(--accent)] font-black">
+                    {stockAdjustPreview}
+                  </span>{" "}
+                  units
+                </span>
+                <span
+                  className={`font-black ${
+                    stockAdjustDelta > 0
+                      ? "text-emerald-600"
+                      : stockAdjustDelta < 0
+                        ? "text-red-600"
+                        : "text-black/40"
+                  }`}
+                >
+                  {stockAdjustDelta > 0 ? `+${stockAdjustDelta}` : stockAdjustDelta}
+                </span>
+              </div>
+
+              {/* Note */}
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-black/50 mb-1.5">
+                  Adjustment Note{" "}
+                  <span className="text-black/30 normal-case">(optional)</span>
+                </p>
+                <input
+                  value={stockAdjustNote}
+                  onChange={(e) => setStockAdjustNote(e.target.value)}
+                  placeholder="e.g. Received new stock shipment"
+                  className="w-full bg-white border border-black/15 rounded-lg px-3 py-2.5 text-sm font-semibold text-black placeholder:text-black/30 focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2.5 p-5 border-t border-black/10 bg-[#FAFAFA]">
+              <button
+                type="button"
+                onClick={closeStockAdjust}
+                disabled={isSavingStock}
+                className="px-4 py-2.5 rounded-lg border border-black/15 bg-white hover:bg-black/5 text-[11px] font-black uppercase tracking-wider text-black cursor-pointer transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveStockAdjustment}
+                disabled={isSavingStock}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:opacity-50 text-white text-[11px] font-black uppercase tracking-wider cursor-pointer transition-colors shadow-xs"
+              >
+                {isSavingStock ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                )}
+                {isSavingStock
+                  ? "Updating..."
+                  : `Update (${stockAdjustDelta > 0 ? `+${stockAdjustDelta}` : stockAdjustDelta})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Category Management Modal */}
       {showCategoryModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
@@ -7284,6 +7624,15 @@ export default function POSBilling() {
                                   >
                                     <Pencil className="w-3 h-3" /> Edit
                                   </button>
+                                  {p.itemType !== "SERVICE" && (
+                                    <button
+                                      onClick={() => openStockAdjust(p)}
+                                      className="text-[10px] font-bold text-black/70 hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 border border-black/15 px-2.5 py-1.5 rounded uppercase tracking-wider transition-colors cursor-pointer inline-flex items-center gap-1"
+                                      title="Adjust stock — restock, return, loss or reconcile"
+                                    >
+                                      <SlidersHorizontal className="w-3 h-3" /> Stock
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => {
                                       if (
@@ -7319,6 +7668,15 @@ export default function POSBilling() {
                                         >
                                           <Pencil className="w-3 h-3" /> Edit
                                         </button>
+                                        {p.itemType !== "SERVICE" && (
+                                          <button
+                                            onClick={() => openStockAdjust(p)}
+                                            className="text-[10px] font-bold text-black bg-white hover:bg-[var(--accent)] hover:text-white border border-black/15 px-3 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                                            title="Adjust stock — restock, return, loss or reconcile"
+                                          >
+                                            <SlidersHorizontal className="w-3 h-3" /> Adjust Stock
+                                          </button>
+                                        )}
                                         <button
                                           onClick={() => setExpandedProductId(null)}
                                           className="text-[10px] font-bold text-black/70 hover:text-black bg-black/5 hover:bg-black/10 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
