@@ -1,9 +1,16 @@
-import { neon } from '@neondatabase/serverless';
+import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
-if (!process.env.DATABASE_URL) {
-  // Fallback for build time if env is missing
-  console.warn('DATABASE_URL is not set. Database operations will fail.');
-}
+export const sql: NeonQueryFunction<false, false> = (() => {
+  const connectionString = process.env.DATABASE_URL;
+  if (connectionString) return neon(connectionString);
 
-export const sql = neon(process.env.DATABASE_URL || 'postgresql://dummy:dummy@dummy/dummy');
-// Forced reload to pick up new DATABASE_URL
+  // Build-time safe (pages can still prerender), but any real query throws a
+  // descriptive error instead of failing against a bogus connection string.
+  console.warn('DATABASE_URL is not set. Database queries will fail until it is configured.');
+  const fail = () => {
+    throw new Error(
+      'DATABASE_URL is not configured. Add it to .env.local (local) or the deployment platform environment variables.'
+    );
+  };
+  return fail as unknown as NeonQueryFunction<false, false>;
+})();

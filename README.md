@@ -76,7 +76,7 @@ npm install
 
 ### 2. Configure Environment Variables
 
-Create a `.env.local` file in the project root:
+Copy `.env.example` to `.env.local` and fill in real values:
 
 ```env
 ADMIN_PASSCODE=your-admin-passcode
@@ -84,9 +84,14 @@ STAFF_PASSCODE=your-staff-passcode
 DATABASE_URL=postgresql://user:password@hostname/dbname?sslmode=require
 ```
 
+> **There are no default passcodes.** If `ADMIN_PASSCODE` and `STAFF_PASSCODE`
+> are both missing, POS login is refused rather than falling back to a
+> well-known value. Likewise, a missing `DATABASE_URL` makes queries fail with
+> an explicit error instead of silently using a dummy connection.
+
 ### 3. Set up the database
 
-Run `schema.sql` once in your Neon SQL Editor (or `psql`) to create a clean, empty database. Optionally run `seed.sql` afterwards to load some sample mobile-shop data.
+Run `schema.sql` once in your Neon SQL Editor (or `psql`) to create a clean, empty database. The `shop_settings` table is also auto-created on first run.
 
 ### 4. Run the Development Server
 
@@ -99,6 +104,39 @@ Open http://localhost:3000.
 - Public store page: `/`
 - POS terminal: `/pos/admin/secure/control-panel/ss-creatives`
 - Digital invoice: `/invoice/[invoice-id]`
+
+## Deploying to Vercel
+
+1. **Rotate the Neon password first.** The database role password must be treated as
+   secret — generate a new one in the Neon console (Connect → Reset password) and copy
+   the new pooled connection string.
+
+2. **Import the repository** at Vercel (`srishaaaaa/dhaaanyaaaa`). Framework preset:
+   Next.js. Build command and output are detected automatically.
+
+3. **Add environment variables** under Project → Settings → Environment Variables,
+   for **Production**, **Preview** and **Development**:
+
+   | Variable | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Neon **pooled** connection string (the `-pooler` host, port `6543`) |
+   | `ADMIN_PASSCODE` | Long random admin passcode |
+   | `STAFF_PASSCODE` | Long random staff passcode |
+
+   These are read server-side only. Nothing secret is exposed to the browser bundle.
+
+4. **Deploy.** Pushing to `main` triggers a production deployment.
+
+5. **Post-deploy checks**
+   - POS login accepts the new passcodes (and *only* those).
+   - A **product** sale decrements stock.
+   - A **service** sale leaves stock untouched.
+   - Automatic offers apply on cart and invoices.
+   - WhatsApp invoice links resolve.
+   - Shop Settings changes (name, logo, categories) appear on `/`, invoices and the manifest.
+
+> Keep the repo private and never commit `.env.local`. `.env.example` is the only
+> env file that belongs in git.
 
 ## Data Model
 
