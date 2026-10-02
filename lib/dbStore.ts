@@ -35,6 +35,24 @@ const uid = () => {
  * with "there is no unique or exclusion constraint matching the ON CONFLICT
  * specification". This promotes the index to UNIQUE and is idempotent.
  */
+/**
+ * Only keep product links that still exist in the catalogue. A stale id (a
+ * product deleted in another tab, or removed by the demo-data rollback) would
+ * violate the *_product_id foreign key and abort the entire save. The line still
+ * bills correctly from its snapshot name/price — it simply loses the catalogue
+ * link, which is exactly what ON DELETE SET NULL does anyway.
+ */
+async function filterLiveProductIds(ids: (string | null | undefined)[]): Promise<Set<string>> {
+  const wanted = ids.filter((id): id is string => Boolean(id));
+  const live = new Set<string>();
+  if (wanted.length === 0) return live;
+  const existing = await sql`SELECT id FROM products WHERE id = ANY(${wanted})`;
+  for (const row of existing as unknown as { id: string }[]) {
+    live.add(row.id);
+  }
+  return live;
+}
+
 async function ensureCustomerSchema(): Promise<void> {
   if (customerSchemaChecked) return;
   try {
@@ -367,22 +385,10 @@ export const dbStore = {
       payload.customerAddress,
     );
 
-    // Only keep product links that still exist in the catalogue. A stale id (e.g. a
-    // product deleted in another tab or rolled back from test data) would violate
-    // the order_items_product_id foreign key and abort the whole sale. The line
-    // still bills correctly from its snapshot name/price.
-    const requestedProductIds = payload.items
-      .map((item) => item.product_id)
-      .filter((id): id is string => Boolean(id));
-    const liveProductIds = new Set<string>();
-    if (requestedProductIds.length > 0) {
-      const existing = await sql`
-        SELECT id FROM products WHERE id = ANY(${requestedProductIds})
-      `;
-      for (const row of existing as unknown as { id: string }[]) {
-        liveProductIds.add(row.id);
-      }
-    }
+    // Same stale-id guard as the regular sale path.
+    const liveProductIds = await filterLiveProductIds(
+      payload.items.map((item) => item.product_id),
+    );
 
     // Each cart line becomes one order item, snapshotting its name and price.
     const finalOrderItems: Omit<OrderItemRow, 'id'>[] = payload.items.map((item) => ({
@@ -516,13 +522,20 @@ export const dbStore = {
       )
     `;
 
+    // Same stale-id guard as the regular sale path, so a catalogue product removed
+    // after it was added to the cart cannot abort the advance order.
+    const liveProductIds = await filterLiveProductIds(
+      payload.items.map((it) => it.product_id),
+    );
+
     await Promise.all(
       payload.items.map((it) =>
         sql`
           INSERT INTO advance_order_items (
             id, advance_order_id, product_id, snapshot_name, snapshot_desc, snapshot_price, quantity
           ) VALUES (
-            ${uid()}, ${payload.advanceOrderId}, ${it.product_id},
+            ${uid()}, ${payload.advanceOrderId},
+            ${it.product_id && liveProductIds.has(it.product_id) ? it.product_id : null},
             ${it.snapshot_name}, ${it.snapshot_desc}, ${it.snapshot_price}, ${it.quantity}
           )
         `,
