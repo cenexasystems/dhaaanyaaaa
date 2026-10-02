@@ -33,16 +33,6 @@ export async function GET() {
     ],
   };
 
-  // Fall back to the bundled logo when an uploaded (data URL) icon is rejected.
-  if (shop.logo_data_url) {
-    manifest.icons.push({
-      src: "/logo.svg",
-      sizes: "any",
-      type: "image/svg+xml",
-      purpose: "any",
-    });
-  }
-
   return new Response(JSON.stringify(manifest), {
     headers: {
       "Content-Type": "application/manifest+json",

@@ -1,12 +1,9 @@
-// Bumped to v2 when the POS moved from /pos/admin/secure/control-panel/ss-creatives
-// to /pos, so installed PWA clients drop their cached copy of the old route.
-const CACHE_NAME = 'dhanyas-boutique-pos-v2';
+// Bumped to v3 so installed PWA clients drop cached copies of the old logo
+// images; the shop logo now comes only from Settings (via the manifest).
+const CACHE_NAME = 'dhanyas-boutique-pos-v3';
 const ASSETS_TO_CACHE = [
   '/store',
   '/manifest.json',
-  '/logo.svg',
-  '/logo.png',
-  '/icon.png',
   '/pos'
 ];
 

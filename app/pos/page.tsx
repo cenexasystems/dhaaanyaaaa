@@ -406,6 +406,9 @@ export default function POSBilling() {
   const [showLowStockAlarm, setShowLowStockAlarm] = useState(false);
   // Shop profile (name, contact details, logo) — editable from the Settings tab.
   const [shopSettings, setShopSettings] = useState<ShopSettings>(DEFAULT_SHOP_SETTINGS);
+  // The defaults point at the bundled /logo.svg, so logos stay hidden until the
+  // real settings arrive — otherwise the old logo flashes before the uploaded one.
+  const [shopSettingsLoaded, setShopSettingsLoaded] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -632,6 +635,7 @@ export default function POSBilling() {
         fetchShopSettings(),
       ]);
       setShopSettings(shopData);
+      setShopSettingsLoaded(true);
       setAdvanceOrders(
         advanceData.map((a) => ({
           ...a,
@@ -699,6 +703,14 @@ export default function POSBilling() {
   };
 
   useEffect(() => {
+    // Shop settings load on their own first so the logo and name appear quickly,
+    // without waiting for orders, products and expenses.
+    fetchShopSettings()
+      .then((data) => {
+        setShopSettings(data);
+        setShopSettingsLoaded(true);
+      })
+      .catch((err) => console.error("Error loading shop settings:", err));
     fetchData();
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setIsSidebarOpen(false);
@@ -2396,8 +2408,22 @@ export default function POSBilling() {
           {/* Card top border gradient accent */}
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[var(--accent)] via-[var(--accent)] to-[var(--accent)]" />
 
+          {/* Logo with Gradient Hover Glow */}
+          <div className="relative group mb-6">
+            <div className="absolute -inset-1.5 bg-gradient-to-r from-[var(--accent)] to-[var(--accent)] rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
+            <div className="relative w-24 h-24 bg-white rounded-2xl border border-[var(--accent)]/30 shadow-lg overflow-hidden flex items-center justify-center">
+              {shopSettingsLoaded && (
+                <img
+                  src={shopSettings.logo_data_url || "/logo.svg"}
+                  alt={`${shopSettings.shop_name} Logo`}
+                  className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500 animate-in fade-in duration-300"
+                />
+              )}
+            </div>
+          </div>
+
           {/* Title */}
-          <h1 className="text-3xl font-serif text-[var(--accent)] tracking-tight leading-tight mb-2 mt-2">
+          <h1 className="text-3xl font-serif text-[var(--accent)] tracking-tight leading-tight mb-2">
             {shopSettings.shop_name}
           </h1>
           <p className="text-[#1C1917]/50 text-xs font-bold uppercase tracking-[0.2em] mb-8">
@@ -3441,11 +3467,13 @@ export default function POSBilling() {
             <div className="p-6 border-b border-white/20 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-md overflow-hidden shrink-0 border border-white/25">
-                  <img
-                    src={shopSettings.logo_data_url || "/logo.svg"}
-                    alt={`${shopSettings.shop_name} Logo`}
-                    className="w-full h-full object-contain"
-                  />
+                  {shopSettingsLoaded && (
+                    <img
+                      src={shopSettings.logo_data_url || "/logo.svg"}
+                      alt={`${shopSettings.shop_name} Logo`}
+                      className="w-full h-full object-contain"
+                    />
+                  )}
                 </div>
                 <div>
                   <span className="font-black text-sm tracking-tight text-[#FFFFFF] block leading-tight">
