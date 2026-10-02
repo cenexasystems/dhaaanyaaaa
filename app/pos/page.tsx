@@ -2370,20 +2370,8 @@ export default function POSBilling() {
           {/* Card top border gradient accent */}
           <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[var(--accent)] via-[var(--accent)] to-[var(--accent)]" />
 
-          {/* Logo with Gradient Hover Glow */}
-          <div className="relative group mb-6">
-            <div className="absolute -inset-1.5 bg-gradient-to-r from-[var(--accent)] to-[var(--accent)] rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative w-24 h-24 bg-white rounded-2xl border border-[var(--accent)]/30 shadow-lg overflow-hidden flex items-center justify-center">
-              <img
-                src={shopSettings.logo_data_url || "/logo.svg"}
-                alt={`${shopSettings.shop_name} Logo`}
-                className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
-              />
-            </div>
-          </div>
-
           {/* Title */}
-          <h1 className="text-3xl font-serif text-[var(--accent)] tracking-tight leading-tight mb-2">
+          <h1 className="text-3xl font-serif text-[var(--accent)] tracking-tight leading-tight mb-2 mt-2">
             {shopSettings.shop_name}
           </h1>
           <p className="text-[#1C1917]/50 text-xs font-bold uppercase tracking-[0.2em] mb-8">
