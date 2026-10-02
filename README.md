@@ -100,6 +100,12 @@ DATABASE_URL=postgresql://user:password@hostname/dbname?sslmode=require
 
 Run `schema.sql` once in your Neon SQL Editor (or `psql`) to create a clean, empty database. The `shop_settings` table is also auto-created on first run.
 
+### 5. (Optional) Load demo catalogue
+
+`test-data.sql` adds 9 sample sarees, blouses and a dupatta so you can try billing immediately.
+
+Every demo row is tagged with a `test-demo-` id and a `[DEMO]` description prefix. To remove it later, run the commented **ROLLBACK** block at the bottom of that file — it deletes only tagged rows and cannot match your real data. Past invoices keep their history (`order_items.product_id` is `ON DELETE SET NULL`).
+
 ### 4. Run the Development Server
 
 ```bash
