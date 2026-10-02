@@ -229,7 +229,7 @@ export const dbStore = {
     try {
       await sql`
         UPDATE products
-        SET current_stock = GREATEST(0, COALESCE(current_stock, 0) - ${qty})
+        SET current_stock = GREATEST(0, COALESCE(current_stock, 0) - ${Number(qty) || 0})
         WHERE id = ${productId} AND item_type = 'PRODUCT' AND current_stock IS NOT NULL
       `;
     } catch (err) {
@@ -581,14 +581,36 @@ export const dbStore = {
     if (advance.status === 'COMPLETED') throw new Error('Advance order already finalized');
     if (advance.status === 'CANCELLED') throw new Error('Advance order was cancelled');
 
-    // Rebuild cart from the stored snapshot items.
+    // A line loses its catalogue link when its product was deleted (ON DELETE SET
+    // NULL) — e.g. the catalogue was rebuilt after the advance was booked. Re-link
+    // those lines by product name so completing the order still reduces stock.
+    const liveProductIds = await filterLiveProductIds(advance.items.map((it) => it.product_id));
+    const unlinkedNames = advance.items
+      .filter((it) => !it.product_id || !liveProductIds.has(it.product_id))
+      .map((it) => it.snapshot_name.trim().toLowerCase());
+    const productIdByName = new Map<string, string>();
+    if (unlinkedNames.length > 0) {
+      const matches = await sql`
+        SELECT id, name FROM products WHERE lower(trim(name)) = ANY(${unlinkedNames})
+      `;
+      for (const row of matches as unknown as { id: string; name: string }[]) {
+        const key = row.name.trim().toLowerCase();
+        if (!productIdByName.has(key)) productIdByName.set(key, row.id);
+      }
+    }
+
+    // Rebuild cart from the stored snapshot items. NUMERIC columns come back as
+    // strings, so coerce them before they reach the stock and total math.
     const cart: CartItem[] = advance.items.map((it) => ({
       id: it.id,
-      product_id: it.product_id,
+      product_id:
+        it.product_id && liveProductIds.has(it.product_id)
+          ? it.product_id
+          : productIdByName.get(it.snapshot_name.trim().toLowerCase()) ?? null,
       name: it.snapshot_name,
       desc: it.snapshot_desc || '',
       price: Number(it.snapshot_price),
-      qty: it.quantity,
+      qty: Number(it.quantity) || 0,
     }));
 
     // Grand total math mirrors POSBilling.completeSale (GST added on top of subtotal).
