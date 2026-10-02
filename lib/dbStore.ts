@@ -18,6 +18,7 @@ import {
 
 // Reset per process so the idempotent column checks only run once.
 let productSchemaChecked = false;
+let customerSchemaChecked = false;
 
 // Utility to generate a unique ID
 const uid = () => {
@@ -26,6 +27,32 @@ const uid = () => {
   }
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
+
+/**
+ * `upsertCustomer` relies on `ON CONFLICT (phone)`, which Postgres only accepts
+ * when a UNIQUE constraint exists on that column. schema.sql originally created a
+ * plain (non-unique) index, so every sale that involved a customer phone failed
+ * with "there is no unique or exclusion constraint matching the ON CONFLICT
+ * specification". This promotes the index to UNIQUE and is idempotent.
+ */
+async function ensureCustomerSchema(): Promise<void> {
+  if (customerSchemaChecked) return;
+  try {
+    // If any historical duplicates exist, collapse them onto the oldest row
+    // before the UNIQUE index can be created.
+    await sql`
+      DELETE FROM customers c
+      USING customers d
+      WHERE c.phone = d.phone
+        AND c.id > d.id
+    `;
+    await sql`DROP INDEX IF EXISTS idx_customers_phone`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone)`;
+    customerSchemaChecked = true;
+  } catch (err) {
+    console.error('Failed to ensure customer schema:', err);
+  }
+}
 
 export const dbStore = {
   // CATEGORIES
@@ -198,6 +225,7 @@ export const dbStore = {
 
   // CUSTOMERS
   async upsertCustomer(name: string, phone: string, address?: string | null): Promise<Customer> {
+    await ensureCustomerSchema();
     const id = uid();
     const rows = await sql`
       INSERT INTO customers (id, name, phone, address)
@@ -339,10 +367,28 @@ export const dbStore = {
       payload.customerAddress,
     );
 
+    // Only keep product links that still exist in the catalogue. A stale id (e.g. a
+    // product deleted in another tab or rolled back from test data) would violate
+    // the order_items_product_id foreign key and abort the whole sale. The line
+    // still bills correctly from its snapshot name/price.
+    const requestedProductIds = payload.items
+      .map((item) => item.product_id)
+      .filter((id): id is string => Boolean(id));
+    const liveProductIds = new Set<string>();
+    if (requestedProductIds.length > 0) {
+      const existing = await sql`
+        SELECT id FROM products WHERE id = ANY(${requestedProductIds})
+      `;
+      for (const row of existing as unknown as { id: string }[]) {
+        liveProductIds.add(row.id);
+      }
+    }
+
     // Each cart line becomes one order item, snapshotting its name and price.
     const finalOrderItems: Omit<OrderItemRow, 'id'>[] = payload.items.map((item) => ({
       order_id: payload.orderId,
-      product_id: item.product_id ?? null,
+      product_id:
+        item.product_id && liveProductIds.has(item.product_id) ? item.product_id : null,
       snapshot_name: item.name,
       snapshot_price: item.price,
       quantity: item.qty,

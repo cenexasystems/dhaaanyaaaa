@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS customers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
+-- UNIQUE is required: the POS upserts customers with ON CONFLICT (phone).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
 
 -- ORDERS (invoices) -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS orders (
