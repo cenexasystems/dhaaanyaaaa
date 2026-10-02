@@ -14,11 +14,15 @@ import {
   AdvanceOrderStatus,
   AdvanceOrderWithRelations,
   ItemType,
+  Staff,
+  AttendanceRecord,
+  AttendanceStatus,
 } from './types';
 
 // Reset per process so the idempotent column checks only run once.
 let productSchemaChecked = false;
 let customerSchemaChecked = false;
+let attendanceSchemaChecked = false;
 
 // Utility to generate a unique ID
 const uid = () => {
@@ -649,5 +653,137 @@ export const dbStore = {
     `;
 
     return { orderId };
+  },
+
+  // STAFF & ATTENDANCE
+
+  /** Create the staff tables on first use so existing databases pick them up. */
+  async ensureAttendanceSchema(): Promise<void> {
+    if (attendanceSchemaChecked) return;
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS staff (
+          id           TEXT PRIMARY KEY,
+          name         TEXT NOT NULL,
+          role         TEXT NOT NULL DEFAULT '',
+          phone        TEXT NOT NULL DEFAULT '',
+          base_salary  NUMERIC NOT NULL DEFAULT 0,
+          is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS staff_attendance (
+          id               TEXT PRIMARY KEY,
+          staff_id         TEXT NOT NULL REFERENCES staff (id) ON DELETE CASCADE,
+          attendance_date  DATE NOT NULL,
+          status           TEXT CHECK (status IN ('PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE')),
+          clock_in         TIMESTAMPTZ,
+          clock_out        TIMESTAMPTZ,
+          updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (staff_id, attendance_date)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance (attendance_date)`;
+      attendanceSchemaChecked = true;
+    } catch (err) {
+      console.error('Failed to ensure attendance schema:', err);
+    }
+  },
+
+  async listStaff(): Promise<Staff[]> {
+    await this.ensureAttendanceSchema();
+    const rows = await sql`SELECT * FROM staff ORDER BY lower(name) ASC`;
+    return (rows as Staff[]).map((s) => ({ ...s, base_salary: Number(s.base_salary) || 0 }));
+  },
+
+  async addStaff(input: {
+    name: string;
+    role: string;
+    phone: string;
+    base_salary: number;
+    is_active: boolean;
+  }): Promise<Staff> {
+    await this.ensureAttendanceSchema();
+    const rows = await sql`
+      INSERT INTO staff (id, name, role, phone, base_salary, is_active)
+      VALUES (${uid()}, ${input.name}, ${input.role}, ${input.phone}, ${input.base_salary}, ${input.is_active})
+      RETURNING *
+    `;
+    return rows[0] as Staff;
+  },
+
+  async updateStaff(
+    id: string,
+    input: { name: string; role: string; phone: string; base_salary: number; is_active: boolean },
+  ): Promise<Staff | null> {
+    await this.ensureAttendanceSchema();
+    const rows = await sql`
+      UPDATE staff
+      SET name = ${input.name}, role = ${input.role}, phone = ${input.phone},
+          base_salary = ${input.base_salary}, is_active = ${input.is_active}
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    return (rows[0] as Staff) ?? null;
+  },
+
+  /** Deleting a staff member also removes their attendance history (cascade). */
+  async deleteStaff(id: string): Promise<void> {
+    await this.ensureAttendanceSchema();
+    await sql`DELETE FROM staff WHERE id = ${id}`;
+  },
+
+  /** Attendance rows between two 'YYYY-MM-DD' dates, inclusive. */
+  async listAttendance(fromDate: string, toDate: string): Promise<AttendanceRecord[]> {
+    await this.ensureAttendanceSchema();
+    // DATE is rendered as text so it never shifts across time zones.
+    const rows = await sql`
+      SELECT id, staff_id, to_char(attendance_date, 'YYYY-MM-DD') AS attendance_date,
+             status, clock_in, clock_out
+      FROM staff_attendance
+      WHERE attendance_date BETWEEN ${fromDate}::date AND ${toDate}::date
+    `;
+    return rows as AttendanceRecord[];
+  },
+
+  /** Set (or clear, with null) a staff member's status for a day. */
+  async setAttendanceStatus(
+    staffId: string,
+    date: string,
+    status: AttendanceStatus | null,
+  ): Promise<void> {
+    await this.ensureAttendanceSchema();
+    await sql`
+      INSERT INTO staff_attendance (id, staff_id, attendance_date, status)
+      VALUES (${uid()}, ${staffId}, ${date}::date, ${status})
+      ON CONFLICT (staff_id, attendance_date)
+      DO UPDATE SET status = EXCLUDED.status, updated_at = now()
+    `;
+  },
+
+  /** Record the clock-in time; marks the day PRESENT unless a status is already set. */
+  async clockIn(staffId: string, date: string): Promise<void> {
+    await this.ensureAttendanceSchema();
+    await sql`
+      INSERT INTO staff_attendance (id, staff_id, attendance_date, status, clock_in)
+      VALUES (${uid()}, ${staffId}, ${date}::date, 'PRESENT', now())
+      ON CONFLICT (staff_id, attendance_date)
+      DO UPDATE SET clock_in = now(),
+                    status = COALESCE(staff_attendance.status, 'PRESENT'),
+                    updated_at = now()
+    `;
+  },
+
+  async clockOut(staffId: string, date: string): Promise<void> {
+    await this.ensureAttendanceSchema();
+    await sql`
+      INSERT INTO staff_attendance (id, staff_id, attendance_date, status, clock_out)
+      VALUES (${uid()}, ${staffId}, ${date}::date, 'PRESENT', now())
+      ON CONFLICT (staff_id, attendance_date)
+      DO UPDATE SET clock_out = now(),
+                    status = COALESCE(staff_attendance.status, 'PRESENT'),
+                    updated_at = now()
+    `;
   },
 };

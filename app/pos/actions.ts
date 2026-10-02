@@ -1,7 +1,7 @@
 "use server";
 
 import { dbStore } from "@/lib/dbStore";
-import { Product, OrderWithRelations, CartItem, Expense, PaymentMode, Category, AdvanceOrderWithRelations, AdvanceOrderStatus, ShopSettings, ItemType } from "@/lib/types";
+import { Product, OrderWithRelations, CartItem, Expense, PaymentMode, Category, AdvanceOrderWithRelations, AdvanceOrderStatus, ShopSettings, ItemType, Staff, AttendanceRecord, AttendanceStatus } from "@/lib/types";
 import { getShopSettings, saveShopSettings, normalizeHex, DEFAULT_ACCENT } from "@/lib/shopSettings";
 
 // Helper to serialize Date objects from Postgres to strings
@@ -209,4 +209,66 @@ export async function updateShopSettings(data: ShopSettings): Promise<ShopSettin
     logo_data_url: data.logo_data_url || null,
   };
   return serialize(await saveShopSettings(clean));
+}
+
+// Staff & attendance
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ATTENDANCE_STATUSES: AttendanceStatus[] = ["PRESENT", "ABSENT", "HALF_DAY", "LEAVE"];
+
+function assertDate(date: string): string {
+  if (!DATE_RE.test(date)) throw new Error(`Invalid date: ${date}`);
+  return date;
+}
+
+type StaffInput = { name: string; role: string; phone: string; base_salary: number; is_active: boolean };
+
+function cleanStaff(data: StaffInput): StaffInput {
+  const name = data.name.trim();
+  if (!name) throw new Error("Staff name is required");
+  return {
+    name,
+    role: data.role.trim(),
+    phone: data.phone.replace(/\D/g, "").slice(-10),
+    base_salary: Math.max(0, Number(data.base_salary) || 0),
+    is_active: Boolean(data.is_active),
+  };
+}
+
+export async function fetchStaff(): Promise<Staff[]> {
+  return serialize(await dbStore.listStaff());
+}
+
+export async function createStaff(data: StaffInput): Promise<Staff> {
+  return serialize(await dbStore.addStaff(cleanStaff(data)));
+}
+
+export async function editStaff(id: string, data: StaffInput): Promise<Staff | null> {
+  return serialize(await dbStore.updateStaff(id, cleanStaff(data)));
+}
+
+export async function removeStaff(id: string): Promise<void> {
+  return await dbStore.deleteStaff(id);
+}
+
+export async function fetchAttendance(fromDate: string, toDate: string): Promise<AttendanceRecord[]> {
+  return serialize(await dbStore.listAttendance(assertDate(fromDate), assertDate(toDate)));
+}
+
+export async function setAttendanceStatus(
+  staffId: string,
+  date: string,
+  status: AttendanceStatus | null,
+): Promise<void> {
+  if (status !== null && !ATTENDANCE_STATUSES.includes(status)) {
+    throw new Error(`Invalid attendance status: ${status}`);
+  }
+  return await dbStore.setAttendanceStatus(staffId, assertDate(date), status);
+}
+
+export async function clockInStaff(staffId: string, date: string): Promise<void> {
+  return await dbStore.clockIn(staffId, assertDate(date));
+}
+
+export async function clockOutStaff(staffId: string, date: string): Promise<void> {
+  return await dbStore.clockOut(staffId, assertDate(date));
 }

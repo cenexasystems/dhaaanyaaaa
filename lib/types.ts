@@ -132,6 +132,28 @@ export type AdvanceOrderWithRelations = AdvanceOrderRow & {
   items: AdvanceOrderItemRow[];
 };
 
+export type Staff = {
+  id: string;
+  name: string;
+  role: string;
+  phone: string;
+  base_salary: number;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'LEAVE';
+
+/** One row per staff member per day (attendance_date is 'YYYY-MM-DD'). */
+export type AttendanceRecord = {
+  id: string;
+  staff_id: string;
+  attendance_date: string;
+  status: AttendanceStatus | null;
+  clock_in: string | null;
+  clock_out: string | null;
+};
+
 export type CartItem = {
   id: string;
   product_id: string | null;

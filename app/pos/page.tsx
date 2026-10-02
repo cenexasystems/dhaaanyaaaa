@@ -56,6 +56,7 @@ import {
   Target,
   CheckCircle2,
   Minus,
+  UserCheck,
 } from "lucide-react";
 import {
   verifyPasscode,
@@ -85,6 +86,9 @@ import {
 import { Product, Expense, Category, AdvanceOrderWithRelations, AdvanceOrderStatus, ShopSettings, ItemType, effectivePrice } from "@/lib/types";
 import { DEFAULT_SHOP_SETTINGS } from "@/lib/shopProfile";
 import SettingsPanel from "./SettingsPanel";
+import AttendancePanel from "./AttendancePanel";
+import StaffPunch from "./StaffPunch";
+import LowStockAlarm, { type LowStockItem } from "./LowStockAlarm";
 
 // Preset expense categories (users can also type a custom one)
 const EXPENSE_CATEGORIES = [
@@ -397,8 +401,9 @@ export default function POSBilling() {
 
   const [activeCategory, setActiveCategory] = useState<string>("ALL");
   const [activeTab, setActiveTab] = useState<
-    "billing" | "orders" | "analytics" | "inventory" | "expenses" | "advance" | "settings"
+    "billing" | "orders" | "analytics" | "inventory" | "expenses" | "advance" | "attendance" | "settings"
   >("billing");
+  const [showLowStockAlarm, setShowLowStockAlarm] = useState(false);
   // Shop profile (name, contact details, logo) — editable from the Settings tab.
   const [shopSettings, setShopSettings] = useState<ShopSettings>(DEFAULT_SHOP_SETTINGS);
   const [isOnline, setIsOnline] = useState(false);
@@ -1174,6 +1179,29 @@ export default function POSBilling() {
     await removeProduct(id);
     setCatalog((prev) => prev.filter((c) => c.id !== id));
   };
+
+  // Stocked products at or below their alert limit (same rule as the Inventory table).
+  const lowStockItems = useMemo<LowStockItem[]>(
+    () =>
+      catalog
+        .filter(
+          (c) =>
+            c.itemType !== "SERVICE" &&
+            c.stock !== null &&
+            c.stock !== undefined &&
+            c.lowStockAlert !== null &&
+            c.lowStockAlert !== undefined &&
+            Number(c.stock) <= Number(c.lowStockAlert),
+        )
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          category: c.category,
+          stock: Number(c.stock) || 0,
+          alertAt: Number(c.lowStockAlert) || 0,
+        })),
+    [catalog],
+  );
 
   // Product prices are GST-exclusive. GST is charged on the discounted subtotal
   // (the taxable value) and added on top of it in the grand total.
@@ -3499,6 +3527,7 @@ export default function POSBilling() {
                   onClick={() => {
                     setActiveTab("inventory");
                     setCompletedBillData(null);
+                    if (lowStockItems.length > 0) setShowLowStockAlarm(true);
                     if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
                     window.scrollTo({ top: 0, behavior: "instant" });
                   }}
@@ -3510,6 +3539,11 @@ export default function POSBilling() {
                 >
                   <Boxes className="w-5 h-5 shrink-0" />
                   Inventory
+                  {lowStockItems.length > 0 && (
+                    <span className="ml-auto min-w-[22px] h-[22px] px-1.5 rounded-full text-[10px] font-black flex items-center justify-center bg-[#DC2626] text-white">
+                      {lowStockItems.length}
+                    </span>
+                  )}
                 </button>
               )}
               {role === "admin" && (
@@ -3546,6 +3580,24 @@ export default function POSBilling() {
                 >
                   <Wallet className="w-5 h-5 shrink-0" />
                   Expense Tracker
+                </button>
+              )}
+              {(role === "admin" || role === "staff") && (
+                <button
+                  onClick={() => {
+                    setActiveTab("attendance");
+                    setCompletedBillData(null);
+                    if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+                    window.scrollTo({ top: 0, behavior: "instant" });
+                  }}
+                  className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer ${
+                    activeTab === "attendance"
+                      ? "bg-white text-[#27272A] shadow-md"
+                      : "text-white/90 hover:bg-white/20 hover:text-white"
+                  }`}
+                >
+                  <UserCheck className="w-5 h-5 shrink-0" />
+                  Attendance
                 </button>
               )}
               {role === "admin" && (
@@ -8000,6 +8052,14 @@ export default function POSBilling() {
             </div>
           </div>
         )}
+
+        {role === "admin" && showLowStockAlarm && lowStockItems.length > 0 && (
+          <LowStockAlarm items={lowStockItems} onClose={() => setShowLowStockAlarm(false)} />
+        )}
+
+        {/* ── Attendance tab (admin: full panel, staff: punch in/out) ── */}
+        {activeTab === "attendance" &&
+          (role === "admin" ? <AttendancePanel /> : role === "staff" ? <StaffPunch /> : null)}
 
         {/* ── Settings tab (admin only) ─────────────────────────────── */}
         {role === "admin" && activeTab === "settings" && (

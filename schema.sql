@@ -156,6 +156,32 @@ CREATE TABLE IF NOT EXISTS advance_order_items (
 CREATE INDEX IF NOT EXISTS idx_advance_items_order
   ON advance_order_items (advance_order_id);
 
+-- STAFF & ATTENDANCE ------------------------------------------------------
+CREATE TABLE IF NOT EXISTS staff (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  role         TEXT NOT NULL DEFAULT '',
+  phone        TEXT NOT NULL DEFAULT '',
+  base_salary  NUMERIC NOT NULL DEFAULT 0,
+  is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per staff member per day. status is NULL until it is set or the
+-- staff member clocks in.
+CREATE TABLE IF NOT EXISTS staff_attendance (
+  id               TEXT PRIMARY KEY,
+  staff_id         TEXT NOT NULL REFERENCES staff (id) ON DELETE CASCADE,
+  attendance_date  DATE NOT NULL,
+  status           TEXT CHECK (status IN ('PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE')),
+  clock_in         TIMESTAMPTZ,
+  clock_out        TIMESTAMPTZ,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (staff_id, attendance_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance (attendance_date);
+
 -- SHOP SETTINGS (single row, id = 'default') -----------------------------
 CREATE TABLE IF NOT EXISTS shop_settings (
   id             TEXT PRIMARY KEY,
