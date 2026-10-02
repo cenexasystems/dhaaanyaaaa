@@ -84,10 +84,8 @@ STAFF_PASSCODE=your-staff-passcode
 DATABASE_URL=postgresql://user:password@hostname/dbname?sslmode=require
 ```
 
-> **There are no default passcodes.** If `ADMIN_PASSCODE` and `STAFF_PASSCODE`
-> are both missing, POS login is refused rather than falling back to a
-> well-known value. Likewise, a missing `DATABASE_URL` makes queries fail with
-> an explicit error instead of silently using a dummy connection.
+> **Note:** if `ADMIN_PASSCODE` / `STAFF_PASSCODE` are unset the POS falls back to
+> `admin123` (admin) and `staff123` (staff). Set both env vars before going live.
 
 ### 3. Set up the database
 
