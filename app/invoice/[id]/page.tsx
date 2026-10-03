@@ -153,6 +153,28 @@ export default async function InvoicePage({
     Math.abs(subtotalNum - discountNum + deliveryFeeNum - grandTotalNum) < 0.01;
   const gstPriceNote = gstInclusive ? "incl. GST" : "excl. GST";
 
+  // Offer lines: original catalogue price vs. the offer price that was billed.
+  // Older lines did not store the original price, so it is derived from the %.
+  const offerFor = (item: (typeof order.items)[number]) => {
+    const pct = Number(item.offer_pct) || 0;
+    if (pct <= 0) return null;
+    const price = Number(item.snapshot_price) || 0;
+    const original =
+      item.original_price !== null && item.original_price !== undefined
+        ? Number(item.original_price)
+        : pct < 100
+          ? Math.round((price / (1 - pct / 100)) * 100) / 100
+          : price;
+    if (original <= price) return null;
+    return { pct, original, price, save: original - price };
+  };
+  const offerSavingsNum = order.items.reduce((sum, item) => {
+    const offer = offerFor(item);
+    return offer ? sum + offer.save * Number(item.quantity) : sum;
+  }, 0);
+  const inr = (n: number) =>
+    n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   const halfGstRate = order.gst_percentage ? order.gst_percentage / 2 : 9;
   const halfGstAmount = gstAmountNum > 0 ? gstAmountNum / 2 : 0;
 
@@ -264,11 +286,15 @@ export default async function InvoicePage({
                   <tr key={i} className="border-b border-dashed border-black/15">
                     <td className="py-1.5 pr-1">
                       <div className="font-semibold">{item.snapshot_name}</div>
-                      {Number(item.offer_pct) > 0 && (
-                        <div className="text-[9px] text-[#15803D] font-semibold">
-                          Offer −{Number(item.offer_pct)}%
-                        </div>
-                      )}
+                      {(() => {
+                        const offer = offerFor(item);
+                        return offer ? (
+                          <div className="text-[9px] font-semibold">
+                            Offer: <span className="line-through">₹{inr(offer.original)}</span> → ₹{inr(offer.price)}
+                            <span className="block">You save ₹{inr(offer.save)} ({offer.pct}% off)</span>
+                          </div>
+                        ) : null;
+                      })()}
                     </td>
                     <td className="py-1.5 text-center">{item.quantity}</td>
                     <td className="py-1.5 text-right font-medium">{(item.quantity * Number(item.snapshot_price)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -282,6 +308,12 @@ export default async function InvoicePage({
               <span>Subtotal:</span>
               <span>{subtotalNum.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             </div>
+            {offerSavingsNum > 0 && (
+              <div className="flex justify-between">
+                <span>Offer savings (in rates):</span>
+                <span>{inr(offerSavingsNum)}</span>
+              </div>
+            )}
             {discountNum > 0 && (
               <div className="flex justify-between text-black">
                 <span>Discount:</span>
@@ -434,11 +466,16 @@ export default async function InvoicePage({
                       <div className="font-medium text-zinc-900">
                         {item.snapshot_name}
                       </div>
-                      {Number(item.offer_pct) > 0 && (
-                        <div className="text-[10px] text-[#15803D] font-semibold">
-                          Offer −{Number(item.offer_pct)}%
-                        </div>
-                      )}
+                      {(() => {
+                        const offer = offerFor(item);
+                        return offer ? (
+                          <div className="mt-1 inline-block text-[10px] font-semibold text-[#15803D] bg-[#15803D]/8 border border-[#15803D]/25 rounded px-1.5 py-0.5">
+                            Offer product · Original price{" "}
+                            <span className="line-through">₹{inr(offer.original)}</span>
+                            {" "}· Offer −₹{inr(offer.save)} ({offer.pct}% off) · Now ₹{inr(offer.price)}
+                          </div>
+                        ) : null;
+                      })()}
                     </td>
                     {order.is_gst && (
                       <td className="py-3 text-center font-mono text-zinc-500">
@@ -549,6 +586,13 @@ export default async function InvoicePage({
               </span>
             </div>
 
+            {offerSavingsNum > 0 && (
+              <div className="flex justify-between text-[#15803D]">
+                <span>Offer savings (already in rates)</span>
+                <span className="font-mono">₹{inr(offerSavingsNum)}</span>
+              </div>
+            )}
+
             {discountNum > 0 && (
               <div className="flex justify-between text-zinc-600">
                 <span>
@@ -606,6 +650,11 @@ export default async function InvoicePage({
                 ₹{grandTotalNum.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
+            {offerSavingsNum + discountNum > 0 && (
+              <div className="text-right text-[11px] font-bold text-[#15803D]">
+                You saved ₹{inr(offerSavingsNum + discountNum)} on this bill
+              </div>
+            )}
           </div>
         </div>
 

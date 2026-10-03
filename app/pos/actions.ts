@@ -48,8 +48,31 @@ export async function fetchProducts(): Promise<Product[]> {
   return serialize(await dbStore.listProducts());
 }
 
+// Blank or non-numeric form values arrive as NaN; never let them reach SQL.
+const num = (v: unknown, fallback = 0): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+const numOrNull = (v: unknown): number | null =>
+  v === null || v === undefined || v === "" ? null : num(v);
+
 export async function createProduct(data: { name: string; description: string | null; category: string; gst_rate: number; hsn_code: string | null; selling_price: number; item_type?: ItemType; cost_price?: number; current_stock?: number | null; low_stock_alert?: number | null; offer_discount_pct?: number; offer_price?: number | null; is_active?: boolean }): Promise<Product> {
-  return serialize(await dbStore.addProduct(data));
+  const name = data.name.trim();
+  if (!name) throw new Error("Product name is required");
+  return serialize(
+    await dbStore.addProduct({
+      ...data,
+      name,
+      category: data.category.trim() || "General",
+      gst_rate: Math.max(0, num(data.gst_rate)),
+      selling_price: Math.max(0, num(data.selling_price)),
+      cost_price: Math.max(0, num(data.cost_price)),
+      current_stock: numOrNull(data.current_stock),
+      low_stock_alert: numOrNull(data.low_stock_alert),
+      offer_discount_pct: Math.min(100, Math.max(0, num(data.offer_discount_pct))),
+      offer_price: numOrNull(data.offer_price),
+    }),
+  );
 }
 
 export async function editProduct(id: string, data: Partial<Product>): Promise<Product | null> {
@@ -149,6 +172,13 @@ export async function createAdvanceOrder(payload: {
   depositPaymentMode: PaymentMode;
   deliveryDate: string | null;
   notes: string | null;
+  discountType: 'PERCENT' | 'FIXED';
+  discountValue: number;
+  discountAmount: number;
+  deliveryFee: number;
+  isGst: boolean;
+  gstPercentage: number;
+  gstAmount: number;
   items: {
     product_id: string | null;
     snapshot_name: string;
@@ -157,7 +187,16 @@ export async function createAdvanceOrder(payload: {
     quantity: number;
   }[];
 }): Promise<{ advanceOrderId: string }> {
-  return await dbStore.createAdvanceOrder(payload);
+  return await dbStore.createAdvanceOrder({
+    ...payload,
+    discountType: payload.discountType === 'PERCENT' ? 'PERCENT' : 'FIXED',
+    discountValue: Math.max(0, num(payload.discountValue)),
+    discountAmount: Math.max(0, num(payload.discountAmount)),
+    deliveryFee: Math.max(0, num(payload.deliveryFee)),
+    isGst: Boolean(payload.isGst),
+    gstPercentage: Math.max(0, num(payload.gstPercentage)),
+    gstAmount: Math.max(0, num(payload.gstAmount)),
+  });
 }
 
 export async function setAdvanceOrderStatus(id: string, status: AdvanceOrderStatus): Promise<void> {

@@ -18,11 +18,15 @@ import {
   AttendanceRecord,
   AttendanceStatus,
 } from './types';
+import { advanceCharges } from './advanceCharges';
 
 // Reset per process so the idempotent column checks only run once.
 let productSchemaChecked = false;
 let customerSchemaChecked = false;
 let attendanceSchemaChecked = false;
+let advanceSchemaChecked = false;
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // Utility to generate a unique ID
 const uid = () => {
@@ -133,6 +137,7 @@ export const dbStore = {
       // The offer percentage is snapshotted per invoice line so the printed
       // invoice can show the discount that was actually applied.
       await sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS offer_pct NUMERIC NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS original_price NUMERIC`;
       productSchemaChecked = true;
     } catch (err) {
       console.error('Failed to ensure product schema:', err);
@@ -403,6 +408,7 @@ export const dbStore = {
       snapshot_price: item.price,
       quantity: item.qty,
       offer_pct: item.offerPct ?? 0,
+      original_price: (item.offerPct ?? 0) > 0 ? item.originalPrice ?? null : null,
     }));
 
     // Subtotal is GST-exclusive (sum of line prices × qty).
@@ -432,10 +438,12 @@ export const dbStore = {
       finalOrderItems.map((oi) =>
         sql`
           INSERT INTO order_items (
-            id, order_id, product_id, snapshot_name, snapshot_price, quantity, offer_pct
+            id, order_id, product_id, snapshot_name, snapshot_price, quantity, offer_pct,
+            original_price
           ) VALUES (
             ${uid()}, ${oi.order_id}, ${oi.product_id},
-            ${oi.snapshot_name}, ${oi.snapshot_price}, ${oi.quantity}, ${oi.offer_pct}
+            ${oi.snapshot_name}, ${oi.snapshot_price}, ${oi.quantity}, ${oi.offer_pct},
+            ${oi.original_price}
           )
         `
       ),
@@ -454,7 +462,26 @@ export const dbStore = {
 
   // ADVANCE ORDERS — partial-payment holds. Revenue is recognized only when the
   // balance is collected and finalizeAdvanceOrder turns the hold into an invoice.
+
+  /** Bill-level charge columns; NULL on orders booked before they existed. */
+  async ensureAdvanceSchema(): Promise<void> {
+    if (advanceSchemaChecked) return;
+    try {
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS discount_type TEXT`;
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS discount_value NUMERIC`;
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC`;
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS delivery_fee NUMERIC`;
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS is_gst BOOLEAN`;
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS gst_percentage NUMERIC`;
+      await sql`ALTER TABLE advance_orders ADD COLUMN IF NOT EXISTS gst_amount NUMERIC`;
+      advanceSchemaChecked = true;
+    } catch (err) {
+      console.error('Failed to ensure advance order schema:', err);
+    }
+  },
+
   async listAdvanceOrders(): Promise<AdvanceOrderWithRelations[]> {
+    await this.ensureAdvanceSchema();
     const rows = await sql`
       SELECT a.*, c.name AS customer_name, c.phone AS customer_phone, c.address AS customer_address
       FROM advance_orders a
@@ -475,6 +502,7 @@ export const dbStore = {
   },
 
   async getAdvanceOrder(id: string): Promise<AdvanceOrderWithRelations | null> {
+    await this.ensureAdvanceSchema();
     const rows = await sql`
       SELECT a.*, c.name AS customer_name, c.phone AS customer_phone, c.address AS customer_address
       FROM advance_orders a
@@ -502,6 +530,13 @@ export const dbStore = {
     depositPaymentMode: PaymentMode;
     deliveryDate: string | null;
     notes: string | null;
+    discountType: 'PERCENT' | 'FIXED';
+    discountValue: number;
+    discountAmount: number;
+    deliveryFee: number;
+    isGst: boolean;
+    gstPercentage: number;
+    gstAmount: number;
     items: {
       product_id: string | null;
       snapshot_name: string;
@@ -510,6 +545,7 @@ export const dbStore = {
       quantity: number;
     }[];
   }): Promise<{ advanceOrderId: string }> {
+    await this.ensureAdvanceSchema();
     const customer = await this.upsertCustomer(
       payload.customerName,
       payload.customerPhone,
@@ -519,11 +555,16 @@ export const dbStore = {
     await sql`
       INSERT INTO advance_orders (
         id, customer_id, status, subtotal, total_amount, deposit_amount,
-        deposit_payment_mode, delivery_date, notes
+        deposit_payment_mode, delivery_date, notes,
+        discount_type, discount_value, discount_amount, delivery_fee,
+        is_gst, gst_percentage, gst_amount
       ) VALUES (
         ${payload.advanceOrderId}, ${customer.id}, 'PENDING',
         ${payload.subtotal}, ${payload.totalAmount}, ${payload.depositAmount},
-        ${payload.depositPaymentMode}, ${payload.deliveryDate}, ${payload.notes}
+        ${payload.depositPaymentMode}, ${payload.deliveryDate}, ${payload.notes},
+        ${payload.discountType}, ${payload.discountValue}, ${payload.discountAmount},
+        ${payload.deliveryFee}, ${payload.isGst},
+        ${payload.isGst ? payload.gstPercentage : 0}, ${payload.isGst ? payload.gstAmount : 0}
       )
     `;
 
@@ -617,14 +658,22 @@ export const dbStore = {
       qty: Number(it.quantity) || 0,
     }));
 
-    // Grand total math mirrors POSBilling.completeSale (GST added on top of subtotal).
+    // The invoice keeps the discount, GST and delivery agreed at booking. A
+    // discount given when the balance is collected comes off the amount payable,
+    // so it is converted to the taxable value it removes: with GST added on top,
+    // a reduction of x in the taxable value lowers the total by x × (1 + GST%).
+    const booked = advanceCharges(advance);
     const rawSubtotal = cart.reduce((acc, i) => acc + i.price * i.qty, 0);
-    const taxableValue = Math.max(0, rawSubtotal - payload.discountAmount);
-    const gstAmount =
-      payload.isGst && payload.gstPercentage > 0
-        ? taxableValue * (payload.gstPercentage / 100)
-        : 0;
-    const grandTotal = taxableValue + gstAmount + payload.deliveryFee;
+    const balanceDue = Math.max(0, booked.total - (Number(advance.deposit_amount) || 0));
+    const balanceDiscount = Math.min(Math.max(0, payload.discountAmount), balanceDue);
+    const gstRate = booked.isGst ? booked.gstPercentage : 0;
+    const totalDiscount = round2(booked.discountAmount + balanceDiscount / (1 + gstRate / 100));
+    const taxableValue = Math.max(0, rawSubtotal - totalDiscount);
+    const gstAmount = round2(taxableValue * (gstRate / 100));
+    const grandTotal = round2(taxableValue + gstAmount + booked.deliveryFee);
+    // Only the booking discount was a percentage; once a balance discount is
+    // added on top, the combined discount is recorded as a fixed amount.
+    const discountIsPercent = balanceDiscount === 0 && booked.discountType === 'PERCENT';
 
     const { orderId } = await this.submitOrder({
       orderId: payload.invoiceId,
@@ -632,15 +681,15 @@ export const dbStore = {
       customerPhone: advance.customer_phone,
       customerAddress: advance.customer_address,
       source: 'OFFLINE',
-      isGst: payload.isGst,
+      isGst: booked.isGst,
       billDate: payload.billDate,
       items: cart,
-      discountType: payload.discountType,
-      discountValue: payload.discountValue,
-      discountAmount: payload.discountAmount,
-      gstPercentage: payload.isGst ? payload.gstPercentage : 0,
+      discountType: discountIsPercent ? 'PERCENT' : 'FIXED',
+      discountValue: discountIsPercent ? booked.discountValue : totalDiscount,
+      discountAmount: totalDiscount,
+      gstPercentage: gstRate,
       gstAmount,
-      deliveryFee: payload.deliveryFee,
+      deliveryFee: booked.deliveryFee,
       grandTotal,
       cashReceived: grandTotal,
       paymentMode: payload.paymentMode,

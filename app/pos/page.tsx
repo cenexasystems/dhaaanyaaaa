@@ -70,6 +70,7 @@ import {
   removeProduct,
   fetchExpenses,
   createExpense,
+  editExpense,
   removeExpense,
   fetchCategories,
   createCategory,
@@ -89,6 +90,7 @@ import SettingsPanel from "./SettingsPanel";
 import AttendancePanel from "./AttendancePanel";
 import StaffPunch from "./StaffPunch";
 import LowStockAlarm, { type LowStockItem } from "./LowStockAlarm";
+import { advanceCharges } from "@/lib/advanceCharges";
 
 // Preset expense categories (users can also type a custom one)
 const EXPENSE_CATEGORIES = [
@@ -179,6 +181,7 @@ type OrderItem = {
   qty: number;
   product_id?: string | null;
   offerPct?: number; // automatic catalogue offer applied to this line
+  originalPrice?: number; // catalogue price before the offer
 };
 
 type CompletedOrder = {
@@ -254,6 +257,7 @@ const SearchableItemInput = ({
     const onOffer = (catItem.offerPct ?? 0) > 0 && (catItem.offerPrice ?? 0) > 0;
     updateItem(item.id, "price", onOffer ? (catItem.offerPrice as number) : (catItem.price ?? 0));
     updateItem(item.id, "offerPct", onOffer ? (catItem.offerPct as number) : 0);
+    updateItem(item.id, "originalPrice", onOffer ? catItem.price : undefined);
     setIsOpen(false);
     setTimeout(() => {
       const priceInput = document.getElementById(`price-${item.id}`);
@@ -500,6 +504,8 @@ export default function POSBilling() {
     new Date().toISOString().split("T")[0],
   );
   const [isSavingExpense, setIsSavingExpense] = useState(false);
+  // Set while the Add Expense form is editing an existing entry.
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [expensePeriod, setExpensePeriod] = useState<
     "all" | "today" | "week" | "month" | "year" | "custom"
   >("month");
@@ -1084,6 +1090,10 @@ export default function POSBilling() {
     }
 
     const priceNum = Number(newCatPrice);
+    if (newCatPrice === "" || !Number.isFinite(priceNum) || priceNum <= 0) {
+      alert("Enter a price greater than 0.");
+      return;
+    }
     if (priceNum > 99999999.99) {
       alert(
         "The price exceeds the maximum allowable system limit of ₹99,999,999.99.",
@@ -1091,14 +1101,26 @@ export default function POSBilling() {
       return;
     }
 
-    // An offer is only meaningful with a positive % and a resulting price.
-    const offerPct = Number(newCatOfferPct) || 0;
-    const offerPrice =
-      offerPct > 0
-        ? newCatOfferPrice === ""
-          ? Math.round((priceNum - (priceNum * offerPct) / 100) * 100) / 100
-          : Number(newCatOfferPrice)
-        : null;
+    // An offer can be entered as a % or as a fixed offer price; the other is
+    // derived so the bill can show original price, saving and offer price.
+    let offerPct = Number(newCatOfferPct) || 0;
+    let offerPrice: number | null = null;
+    const typedOfferPrice = newCatOfferPrice === "" ? null : Number(newCatOfferPrice);
+    if (offerPct > 0) {
+      offerPrice =
+        typedOfferPrice ?? Math.round((priceNum - (priceNum * offerPct) / 100) * 100) / 100;
+    } else if (typedOfferPrice !== null && typedOfferPrice > 0) {
+      offerPrice = typedOfferPrice;
+      offerPct = Math.round(((priceNum - typedOfferPrice) / priceNum) * 10000) / 100;
+    }
+    if (offerPct > 100) {
+      alert("The offer discount cannot be more than 100%.");
+      return;
+    }
+    if (offerPrice !== null && (offerPrice <= 0 || offerPrice >= priceNum)) {
+      alert("The offer price must be more than ₹0 and less than the original price.");
+      return;
+    }
 
     const isService = newCatType === "SERVICE";
 
@@ -1106,9 +1128,9 @@ export default function POSBilling() {
       name: newCatName.trim(),
       description: newCatDesc || null,
       category: newCatCategory.trim() || "General",
-      gst_rate: 0,
-      hsn_code: null,
-      selling_price: newCatPrice === "" ? 0 : Number(newCatPrice),
+      gst_rate: Number(newCatGst) || 0,
+      hsn_code: newCatHsn.trim() || null,
+      selling_price: priceNum,
       item_type: newCatType,
       cost_price: newCatCost === "" ? 0 : Number(newCatCost),
       // Services never carry stock — the store nulls these out server-side.
@@ -1154,9 +1176,15 @@ export default function POSBilling() {
       );
 
       if (catalogTargetRowId) {
+        updateItem(catalogTargetRowId, "product_id", data.id);
         updateItem(catalogTargetRowId, "name", data.name);
         updateItem(catalogTargetRowId, "price", effectivePrice(data));
         updateItem(catalogTargetRowId, "offerPct", Number(data.offer_discount_pct) || 0);
+        updateItem(
+          catalogTargetRowId,
+          "originalPrice",
+          Number(data.offer_discount_pct) > 0 ? Number(data.selling_price) : undefined,
+        );
         setCatalogTargetRowId(null);
       }
 
@@ -1169,6 +1197,8 @@ export default function POSBilling() {
       setCatalog([...catalog, newItem]);
 
       if (catalogTargetRowId) {
+        // Link the bill row to the new product so selling it reduces stock.
+        updateItem(catalogTargetRowId, "product_id", product.id);
         updateItem(catalogTargetRowId, "name", product.name);
         updateItem(catalogTargetRowId, "price", effectivePrice(product));
         updateItem(
@@ -1176,12 +1206,22 @@ export default function POSBilling() {
           "offerPct",
           Number(product.offer_discount_pct) || 0,
         );
+        updateItem(
+          catalogTargetRowId,
+          "originalPrice",
+          Number(product.offer_discount_pct) > 0 ? Number(product.selling_price) : undefined,
+        );
         setCatalogTargetRowId(null);
       }
 
       resetCatalogForm();
       setShowCatalogModal(false);
     }
+    } catch (err) {
+      console.error("Failed to save catalogue item:", err);
+      alert(
+        "Could not save this item to the database. Please check your connection and try again.",
+      );
     } finally {
       setIsSavingCatalog(false);
     }
@@ -1312,6 +1352,14 @@ export default function POSBilling() {
         depositPaymentMode: advDepositPaymentMode,
         deliveryDate: advDeliveryDate || null,
         notes: advNotes.trim() || null,
+        // Bill-level charges, so the receipt and the final invoice keep them.
+        discountType: discountType === "percent" ? "PERCENT" : "FIXED",
+        discountValue: Number(discountValue) || 0,
+        discountAmount: calculatedDiscount,
+        deliveryFee: Number(deliveryFee) || 0,
+        isGst: applyGST,
+        gstPercentage: applyGST ? gstPercentage : 0,
+        gstAmount,
         items: items.map((i) => ({
           product_id: i.product_id || null,
           snapshot_name: i.name,
@@ -1332,6 +1380,8 @@ export default function POSBilling() {
       setCustomerAddress("");
       setDiscountValue(0);
       setDeliveryFee(0);
+      setApplyGST(false);
+      setGstPercentage(18);
       setCashReceived(0);
       setSplitCash(0);
       setSplitGpay(0);
@@ -1611,6 +1661,7 @@ export default function POSBilling() {
           price: i.price,
           qty: i.qty,
           offerPct: i.offerPct ?? 0,
+          originalPrice: (i.offerPct ?? 0) > 0 ? i.originalPrice ?? null : null,
         })),
         discountType: discountType === "percent" ? "PERCENT" : "FIXED",
         discountValue: discountValue,
@@ -1639,6 +1690,8 @@ export default function POSBilling() {
           desc: i.name === "Custom Item" ? "Custom" : (i.desc || ""),
           price: Number(i.price) || 0,
           qty: Number(i.qty) || 0,
+          offerPct: i.offerPct ?? 0,
+          originalPrice: i.originalPrice,
         })),
         subtotal: Number(localSubtotal) || 0,
         discount: Number(localCalculatedDiscount) || 0,
@@ -1738,6 +1791,22 @@ export default function POSBilling() {
     let message = `${shopEmoji} *${shopSettings.shop_name}* ${shopEmoji}\n\n`;
     message += `${checkEmoji} Here are your ${order.isGst ? "GST invoice" : "bill"} details!\n\n`;
 
+    const offerSavings = order.items.reduce(
+      (sum, i) =>
+        (i.offerPct ?? 0) > 0 && i.originalPrice
+          ? sum + (i.originalPrice - i.price) * i.qty
+          : sum,
+      0,
+    );
+    if (offerSavings > 0.009) {
+      message += `Offer items:\n`;
+      for (const i of order.items) {
+        if ((i.offerPct ?? 0) > 0 && i.originalPrice) {
+          message += `• ${i.name}: ₹${i.originalPrice.toLocaleString("en-IN")} → ₹${i.price.toLocaleString("en-IN")} (${i.offerPct}% off)\n`;
+        }
+      }
+      message += `You saved ₹${offerSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })} on offers!\n\n`;
+    }
     message += `Subtotal: ₹${order.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n`;
     if (order.discount > 0) {
       message += `Discount Applied: -₹${order.discount.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n`;
@@ -1836,16 +1905,34 @@ export default function POSBilling() {
       alert("Please enter a valid amount greater than 0.");
       return;
     }
+    const payload = {
+      title: expTitle.trim(),
+      category,
+      amount: amountNum,
+      payment_mode: expPaymentMode,
+      notes: expNotes.trim() || null,
+      expense_date: expDate,
+    };
     setIsSavingExpense(true);
     try {
-      const created = await createExpense({
-        title: expTitle.trim(),
-        category,
-        amount: amountNum,
-        payment_mode: expPaymentMode,
-        notes: expNotes.trim() || null,
-        expense_date: expDate,
-      });
+      if (editingExpenseId) {
+        const updated = await editExpense(editingExpenseId, payload);
+        if (!updated) {
+          alert("This expense no longer exists - it may have been deleted.");
+          setExpenses((prev) => prev.filter((e) => e.id !== editingExpenseId));
+        } else {
+          setExpenses((prev) =>
+            prev.map((e) =>
+              e.id === editingExpenseId
+                ? { ...updated, amount: Number(updated.amount) || 0 }
+                : e,
+            ),
+          );
+        }
+        cancelEditExpense();
+        return;
+      }
+      const created = await createExpense(payload);
       setExpenses((prev) => [
         { ...created, amount: Number(created.amount) || 0 },
         ...prev,
@@ -1866,11 +1953,43 @@ export default function POSBilling() {
     }
   };
 
+  const startEditExpense = (e: Expense) => {
+    setEditingExpenseId(e.id);
+    setExpTitle(e.title);
+    setExpAmount(Number(e.amount) || "");
+    // Show the date as the user's local calendar day, matching the list.
+    setExpDate(new Date(e.expense_date).toLocaleDateString("en-CA"));
+    if ((EXPENSE_CATEGORIES as readonly string[]).includes(e.category)) {
+      setExpCategory(e.category);
+      setExpCustomCategory("");
+    } else {
+      setExpCategory("__custom__");
+      setExpCustomCategory(e.category);
+    }
+    setExpPaymentMode(e.payment_mode);
+    setExpNotes(e.notes || "");
+    document
+      .getElementById("expense-form")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const cancelEditExpense = () => {
+    setEditingExpenseId(null);
+    setExpTitle("");
+    setExpAmount("");
+    setExpNotes("");
+    setExpCustomCategory("");
+    setExpCategory(EXPENSE_CATEGORIES[0]);
+    setExpPaymentMode("CASH");
+    setExpDate(new Date().toLocaleDateString("en-CA"));
+  };
+
   const handleDeleteExpense = async (id: string) => {
     if (!window.confirm("Delete this expense? This cannot be undone.")) return;
     try {
       await removeExpense(id);
       setExpenses((prev) => prev.filter((e) => e.id !== id));
+      if (editingExpenseId === id) cancelEditExpense();
     } catch (err) {
       console.error("Error deleting expense:", err);
       alert("Could not delete the expense.");
@@ -3351,6 +3470,41 @@ export default function POSBilling() {
                 Cost price is for your records only — it is never used in billing.
               </p>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1.5">
+                    GST Rate (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="28"
+                    placeholder="5"
+                    className="w-full bg-white border border-gray-200 hover:border-gray-300 focus:border-[var(--accent)] rounded-lg px-3.5 py-2.5 text-sm font-bold text-black focus:outline-none transition-colors shadow-xs"
+                    value={newCatGst}
+                    onWheel={(e) => e.currentTarget.blur()}
+                    onChange={(e) =>
+                      setNewCatGst(e.target.value === "" ? "" : parseFloat(e.target.value))
+                    }
+                  />
+                  <p className="text-[9px] text-gray-400 font-semibold mt-1">
+                    Pre-fills the GST % when this item is on a GST invoice.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1.5">
+                    HSN / SAC Code
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Optional"
+                    className="w-full bg-white border border-gray-200 hover:border-gray-300 focus:border-[var(--accent)] rounded-lg px-3.5 py-2.5 text-sm font-semibold text-black focus:outline-none transition-colors shadow-xs"
+                    value={newCatHsn}
+                    onChange={(e) => setNewCatHsn(e.target.value)}
+                  />
+                </div>
+              </div>
+
               {/* Automatic offer — applied whenever the item is added to a bill */}
               <div className="border border-amber-200 bg-amber-50/60 rounded-xl p-3.5 space-y-3">
                 <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest flex items-center gap-1.5">
@@ -3371,11 +3525,13 @@ export default function POSBilling() {
                       className="w-full bg-white border border-amber-200 focus:border-amber-400 rounded-lg px-3.5 py-2.5 text-sm font-bold text-black focus:outline-none transition-colors"
                       value={newCatOfferPct}
                       onWheel={(e) => e.currentTarget.blur()}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setNewCatOfferPct(
                           e.target.value === "" ? "" : parseFloat(e.target.value),
-                        )
-                      }
+                        );
+                        // The offer price is re-derived from the new %.
+                        setNewCatOfferPrice("");
+                      }}
                     />
                   </div>
                   <div>
@@ -3393,11 +3549,13 @@ export default function POSBilling() {
                       className="w-full bg-white border border-amber-200 focus:border-amber-400 rounded-lg px-3.5 py-2.5 text-sm font-bold text-black focus:outline-none transition-colors"
                       value={newCatOfferPrice}
                       onWheel={(e) => e.currentTarget.blur()}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setNewCatOfferPrice(
                           e.target.value === "" ? "" : parseFloat(e.target.value),
-                        )
-                      }
+                        );
+                        // A fixed offer price sets the % (derived on save).
+                        setNewCatOfferPct("");
+                      }}
                     />
                   </div>
                 </div>
@@ -4179,7 +4337,10 @@ export default function POSBilling() {
                               {/* Automatic offer applied to this line */}
                               {(item.offerPct ?? 0) > 0 && (
                                 <span className="absolute -top-1 right-0 sm:right-[calc(100%+0.5rem)] text-[9px] font-black uppercase tracking-widest text-[#15803D] bg-[#15803D]/10 border border-[#15803D]/30 px-1.5 py-0.5 rounded">
-                                  Offer −{item.offerPct}% applied
+                                  Offer −{item.offerPct}%
+                                  {item.originalPrice
+                                    ? ` · ₹${item.originalPrice.toLocaleString("en-IN")} → ₹${item.price.toLocaleString("en-IN")}`
+                                    : " applied"}
                                 </span>
                               )}
 
@@ -4281,6 +4442,11 @@ export default function POSBilling() {
                                                     onOffer
                                                       ? (catItem.offerPct as number)
                                                       : 0,
+                                                  );
+                                                  updateItem(
+                                                    item.id,
+                                                    "originalPrice",
+                                                    onOffer ? catItem.price : undefined,
                                                   );
                                                   setActiveCatalogRowId(null);
                                                 }}
@@ -4961,6 +5127,41 @@ export default function POSBilling() {
                     </div>
                   ))}
                 </div>
+
+                {(() => {
+                  const c = advanceCharges(selectedAdvance);
+                  const money = (n: number) =>
+                    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  if (c.discountAmount <= 0 && c.gstAmount <= 0 && c.deliveryFee <= 0) return null;
+                  return (
+                    <div className="border border-black/10 rounded-lg p-3 space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="font-semibold text-black/60">Subtotal</span>
+                        <span className="font-bold text-black">₹{money(c.subtotal)}</span>
+                      </div>
+                      {c.discountAmount > 0 && (
+                        <div className="flex justify-between text-[#15803D]">
+                          <span className="font-semibold">
+                            Discount{c.discountType === "PERCENT" ? ` (${c.discountValue}%)` : ""}
+                          </span>
+                          <span className="font-bold">− ₹{money(c.discountAmount)}</span>
+                        </div>
+                      )}
+                      {c.gstAmount > 0 && (
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-black/60">GST ({c.gstPercentage}%)</span>
+                          <span className="font-bold text-black">+ ₹{money(c.gstAmount)}</span>
+                        </div>
+                      )}
+                      {c.deliveryFee > 0 && (
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-black/60">Delivery</span>
+                          <span className="font-bold text-black">+ ₹{money(c.deliveryFee)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-[#F4F4F5] border border-black/10 rounded-lg p-2.5">
@@ -7106,10 +7307,15 @@ export default function POSBilling() {
             {/* Two-column: add form + category breakdown */}
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
               {/* Add expense form */}
-              <div className="lg:col-span-2 bg-white border border-black/10 rounded-2xl p-5 shadow-sm h-fit">
+              <div
+                id="expense-form"
+                className={`lg:col-span-2 bg-white border rounded-2xl p-5 shadow-sm h-fit scroll-mt-4 ${
+                  editingExpenseId ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/15" : "border-black/10"
+                }`}
+              >
                 <h3 className="text-sm font-black text-[#000000] uppercase tracking-wider flex items-center gap-2 mb-4">
                   <span className="w-1.5 h-6 bg-[var(--accent)] rounded-full" />
-                  Add Expense
+                  {editingExpenseId ? "Edit Expense" : "Add Expense"}
                 </h3>
                 <div className="space-y-3">
                   <div>
@@ -7221,9 +7427,23 @@ export default function POSBilling() {
                     disabled={isSavingExpense}
                     className="w-full mt-1 bg-[var(--accent)] hover:bg-[#27272A] disabled:opacity-60 text-white py-3 rounded-lg font-black text-[11px] uppercase tracking-[0.1em] flex items-center justify-center gap-2 transition-transform active:scale-[0.98] shadow-sm cursor-pointer"
                   >
-                    <Plus className="w-4 h-4" />
-                    {isSavingExpense ? "Saving…" : "Add Expense"}
+                    {editingExpenseId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    {isSavingExpense
+                      ? "Saving…"
+                      : editingExpenseId
+                        ? "Update Expense"
+                        : "Add Expense"}
                   </button>
+                  {editingExpenseId && (
+                    <button
+                      type="button"
+                      onClick={cancelEditExpense}
+                      disabled={isSavingExpense}
+                      className="w-full bg-black/5 hover:bg-black/10 text-[#000000] py-2.5 rounded-lg font-black text-[11px] uppercase tracking-[0.1em] cursor-pointer transition-colors"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -7396,14 +7616,27 @@ export default function POSBilling() {
                               maximumFractionDigits: 2,
                             })}
                           </td>
-                          <td className="p-3 text-center">
-                            <button
-                              onClick={() => handleDeleteExpense(e.id)}
-                              title="Delete expense"
-                              className="inline-flex items-center justify-center w-8 h-8 bg-[#B91C1C]/10 hover:bg-[#B91C1C]/20 text-[#B91C1C] rounded-md transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                          <td className="p-3">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => startEditExpense(e)}
+                                title="Edit expense"
+                                className={`inline-flex items-center justify-center w-8 h-8 rounded-md transition-colors cursor-pointer ${
+                                  editingExpenseId === e.id
+                                    ? "bg-[var(--accent)] text-white"
+                                    : "bg-black/5 hover:bg-black/10 text-[#000000]"
+                                }`}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteExpense(e.id)}
+                                title="Delete expense"
+                                className="inline-flex items-center justify-center w-8 h-8 bg-[#B91C1C]/10 hover:bg-[#B91C1C]/20 text-[#B91C1C] rounded-md transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

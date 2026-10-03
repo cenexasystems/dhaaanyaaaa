@@ -77,6 +77,7 @@ export type OrderItemRow = {
   snapshot_price: number;
   quantity: number;
   offer_pct: number; // automatic offer applied to this line (0 = none)
+  original_price: number | null; // catalogue price before the offer (NULL on older lines)
 };
 
 export type OrderWithRelations = OrderRow & {
@@ -109,6 +110,15 @@ export type AdvanceOrderRow = {
   deposit_payment_mode: PaymentMode;
   delivery_date: string | null;
   notes: string | null;
+  // Bill-level charges at booking; NULL on orders booked before they were stored
+  // (see lib/advanceCharges.ts).
+  discount_type: 'PERCENT' | 'FIXED' | null;
+  discount_value: number | null;
+  discount_amount: number | null;
+  delivery_fee: number | null;
+  is_gst: boolean | null;
+  gst_percentage: number | null;
+  gst_amount: number | null;
   finalized_order_id: string | null;
   finalized_at: string | null;
   cancelled_at: string | null;
@@ -162,6 +172,7 @@ export type CartItem = {
   price: number;
   qty: number;
   offerPct?: number; // automatic catalogue offer applied to this line
+  originalPrice?: number | null; // catalogue price before the offer
 };
 
 /**

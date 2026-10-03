@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS order_items (
   snapshot_name  TEXT NOT NULL,
   snapshot_price NUMERIC NOT NULL DEFAULT 0,
   quantity       NUMERIC NOT NULL DEFAULT 1,
-  offer_pct      NUMERIC NOT NULL DEFAULT 0
+  offer_pct      NUMERIC NOT NULL DEFAULT 0,
+  original_price NUMERIC  -- catalogue price before the offer
 );
 
 CREATE INDEX IF NOT EXISTS idx_order_items_order   ON order_items (order_id);
@@ -134,6 +135,14 @@ CREATE TABLE IF NOT EXISTS advance_orders (
                        CHECK (deposit_payment_mode IN ('CASH', 'GPAY', 'SPLIT')),
   delivery_date        DATE,
   notes                TEXT,
+  -- bill-level charges at booking (NULL on orders booked before they were stored)
+  discount_type        TEXT,
+  discount_value       NUMERIC,
+  discount_amount      NUMERIC,
+  delivery_fee         NUMERIC,
+  is_gst               BOOLEAN,
+  gst_percentage       NUMERIC,
+  gst_amount           NUMERIC,
   finalized_order_id   TEXT,
   finalized_at         TIMESTAMPTZ,
   cancelled_at         TIMESTAMPTZ,
