@@ -16,6 +16,8 @@ export default async function AdvanceReceiptPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const isEmbed = resolvedSearchParams.embed === "true";
   const autoPrint = resolvedSearchParams.print === "true";
+  const paper = resolvedSearchParams.paper || "a4";
+  const size = resolvedSearchParams.size || "a4";
 
   const advance = await dbStore.getAdvanceOrder(id);
   const shop = await getShopSettings();
@@ -48,8 +50,21 @@ export default async function AdvanceReceiptPage({
   const totalNum = Number(advance.total_amount) || 0;
   const depositNum = Number(advance.deposit_amount) || 0;
   const balanceNum = Math.max(0, totalNum - depositNum);
-  const depositLabel =
-    advance.deposit_payment_mode === "GPAY" ? "GPay" : "Cash";
+  const modeLabel = (mode: string | null | undefined) =>
+    mode === "SPLIT" ? "Cash + GPay" : mode === "GPAY" ? "GPay" : "Cash";
+  const depositLabel = modeLabel(advance.deposit_payment_mode);
+
+  // A completed advance is billed as paid in full. The final invoice holds what
+  // was actually collected, including any discount given on the balance.
+  const isCompleted = advance.status === "COMPLETED";
+  const finalOrder =
+    isCompleted && advance.finalized_order_id
+      ? await dbStore.getOrderWithRelations(advance.finalized_order_id)
+      : null;
+  const finalTotalNum = finalOrder ? Number(finalOrder.grand_total) || 0 : totalNum;
+  const balanceDiscountNum = Math.max(0, totalNum - finalTotalNum);
+  const balancePaidNum = Math.max(0, finalTotalNum - depositNum);
+  const balancePaidLabel = modeLabel(finalOrder?.payment_mode);
 
   const fmt = (n: number) =>
     n.toLocaleString("en-IN", {
@@ -81,7 +96,18 @@ export default async function AdvanceReceiptPage({
     >
       <style>{`
         @media print {
-          @page { size: A4 portrait; margin: 12mm 10mm; }
+          @page {
+            size: ${
+              paper === "thermal"
+                ? size === "58"
+                  ? "58mm auto"
+                  : "80mm auto"
+                : size === "a5"
+                  ? "A5 portrait"
+                  : "A4 portrait"
+            };
+            margin: ${paper === "thermal" ? "3mm" : size === "a5" ? "10mm" : "12mm 10mm"};
+          }
           html, body {
             background: #ffffff !important;
             color: #000000 !important;
@@ -116,6 +142,159 @@ export default async function AdvanceReceiptPage({
         </div>
       )}
 
+      {paper === "thermal" ? (
+        <div className={`invoice-sheet bg-white mx-auto text-black font-mono leading-tight p-3 ${size === "58" ? "w-[260px]" : "w-[320px]"}`}>
+          {/* Thermal Receipt Layout */}
+          <div className="text-center pb-3 border-b border-dashed border-black/40 mb-3">
+            <h1 className="text-xl font-bold tracking-tight">{shop.shop_name}</h1>
+            {shop.address && <p className="text-[11px] mt-1">{shop.address}</p>}
+            {shopPhone && <p className="text-[11px]">Ph: {shopPhone}</p>}
+          </div>
+          <div className="text-[11px] pb-3 border-b border-dashed border-black/40 mb-3 space-y-1">
+            <div className="flex justify-between">
+              <span className="font-bold">{isCompleted ? "ADVANCE ORDER BILL" : "ADVANCE RECEIPT"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>No:</span>
+              <span>#{advance.id}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Date:</span>
+              <span>{formattedDate}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Status:</span>
+              <span className="uppercase">{advance.status}</span>
+            </div>
+            {deliveryDate && (
+              <div className="flex justify-between">
+                <span>Delivery:</span>
+                <span>{deliveryDate}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span>Customer:</span>
+              <span className="font-semibold text-right">
+                {advance.customer_name?.trim() ? advance.customer_name : "Counter Customer"}
+              </span>
+            </div>
+            {advance.customer_phone && (
+              <div className="flex justify-between">
+                <span>Phone:</span>
+                <span>{advance.customer_phone}</span>
+              </div>
+            )}
+          </div>
+          <div className="text-[11px] w-full">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-dashed border-black/40">
+                  <th className="py-1 font-bold">Item</th>
+                  <th className="py-1 font-bold text-center">Qty</th>
+                  <th className="py-1 font-bold text-right">Amt</th>
+                </tr>
+              </thead>
+              <tbody className="align-top">
+                {advance.items.map((item, i) => (
+                  <tr key={i} className="border-b border-dashed border-black/15">
+                    <td className="py-1.5 pr-1 font-semibold">{item.snapshot_name}</td>
+                    <td className="py-1.5 text-center">{item.quantity}</td>
+                    <td className="py-1.5 text-right font-medium">
+                      {fmt((Number(item.snapshot_price) || 0) * item.quantity)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[11px] py-3 border-b border-dashed border-black/40 mb-3 space-y-1.5">
+            {(charges.discountAmount > 0 || charges.gstAmount > 0 || charges.deliveryFee > 0) && (
+              <>
+                <div className="flex justify-between">
+                  <span>Subtotal:</span>
+                  <span>{fmt(charges.subtotal)}</span>
+                </div>
+                {charges.discountAmount > 0 && (
+                  <div className="flex justify-between">
+                    <span>Discount:</span>
+                    <span>-{fmt(charges.discountAmount)}</span>
+                  </div>
+                )}
+                {charges.gstAmount > 0 && (
+                  <div className="flex justify-between">
+                    <span>GST ({charges.gstPercentage}%):</span>
+                    <span>{fmt(charges.gstAmount)}</span>
+                  </div>
+                )}
+                {charges.deliveryFee > 0 && (
+                  <div className="flex justify-between">
+                    <span>Delivery:</span>
+                    <span>{fmt(charges.deliveryFee)}</span>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="flex justify-between font-bold">
+              <span>Order Total:</span>
+              <span>{fmt(totalNum)}</span>
+            </div>
+            {isCompleted ? (
+              <>
+                {balanceDiscountNum > 0 && (
+                  <div className="flex justify-between">
+                    <span>Disc. at Delivery:</span>
+                    <span>-{fmt(balanceDiscountNum)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span>Advance ({depositLabel}):</span>
+                  <span>{fmt(depositNum)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Balance ({balancePaidLabel}):</span>
+                  <span>{fmt(balancePaidNum)}</span>
+                </div>
+                <div className="flex justify-between text-[14px] font-black mt-2 pt-1 border-t border-dashed border-black/40">
+                  <span>TOTAL PAID:</span>
+                  <span>₹{fmt(depositNum + balancePaidNum)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Balance Due:</span>
+                  <span>{fmt(0)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span>Deposit ({depositLabel}):</span>
+                  <span>-{fmt(depositNum)}</span>
+                </div>
+                <div className="flex justify-between text-[14px] font-black mt-2 pt-1 border-t border-dashed border-black/40">
+                  <span>BALANCE DUE:</span>
+                  <span>₹{fmt(balanceNum)}</span>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="text-[10px] space-y-0.5 mb-3">
+            {isCompleted ? (
+              <>
+                <p>Delivered and paid in full.</p>
+                {finalOrder && <p>Final invoice: #{finalOrder.id}</p>}
+              </>
+            ) : (
+              <>
+                <p>Advance deposit receipt, not a tax invoice.</p>
+                <p>Balance payable on or before delivery.</p>
+              </>
+            )}
+            {advance.notes && <p className="pt-1">Notes: {advance.notes}</p>}
+          </div>
+          <div className="text-[11px] text-center pt-2 font-semibold italic">
+            Thank you for your business!
+          </div>
+        </div>
+      ) : (
       <div className="invoice-sheet w-full max-w-[760px] bg-white border border-zinc-200/80 shadow-xs rounded-sm p-6 sm:p-12 text-zinc-900 print:border-none print:shadow-none print:p-0 print:rounded-none">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pb-6 border-b-2 border-[var(--accent)]">
@@ -145,7 +324,7 @@ export default async function AdvanceReceiptPage({
           <div className="sm:text-right space-y-1.5 shrink-0">
             <div>
               <span className="text-lg font-bold tracking-tight text-[var(--accent)] uppercase">
-                Advance Receipt
+                {isCompleted ? "Advance Order Bill" : "Advance Receipt"}
               </span>
               <p className="text-xs font-mono text-zinc-500">#{advance.id}</p>
             </div>
@@ -242,8 +421,19 @@ export default async function AdvanceReceiptPage({
           <div className="space-y-4 max-w-sm">
             <div className="text-[11px] text-zinc-500 leading-relaxed">
               <p className="font-medium text-zinc-700 mb-0.5">Please note:</p>
-              <p>• This is an advance-order deposit receipt, not a final tax invoice.</p>
-              <p>• The balance is payable on or before delivery/collection.</p>
+              {isCompleted ? (
+                <>
+                  <p>• This advance order has been delivered and paid in full.</p>
+                  {finalOrder && (
+                    <p>• Final invoice: #{finalOrder.id}</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p>• This is an advance-order deposit receipt, not a final tax invoice.</p>
+                  <p>• The balance is payable on or before delivery/collection.</p>
+                </>
+              )}
             </div>
           </div>
 
@@ -280,18 +470,51 @@ export default async function AdvanceReceiptPage({
               <span>Order Total</span>
               <span className="font-mono text-zinc-900">₹{fmt(totalNum)}</span>
             </div>
-            <div className="flex justify-between text-zinc-600">
-              <span>Deposit Paid ({depositLabel})</span>
-              <span className="font-mono text-zinc-900">− ₹{fmt(depositNum)}</span>
-            </div>
-            <div className="border-t-2 border-[var(--accent)] pt-2.5 mt-2 flex justify-between items-baseline">
-              <span className="text-sm font-bold text-[var(--accent)] uppercase">
-                Balance Due
-              </span>
-              <span className="font-mono text-lg font-bold text-[var(--accent)]">
-                ₹{fmt(balanceNum)}
-              </span>
-            </div>
+            {isCompleted ? (
+              <>
+                {balanceDiscountNum > 0 && (
+                  <div className="flex justify-between text-zinc-600">
+                    <span>Discount at Delivery</span>
+                    <span className="font-mono text-zinc-900">− ₹{fmt(balanceDiscountNum)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-zinc-600">
+                  <span>Advance Paid ({depositLabel})</span>
+                  <span className="font-mono text-zinc-900">₹{fmt(depositNum)}</span>
+                </div>
+                <div className="flex justify-between text-zinc-600">
+                  <span>Balance Paid ({balancePaidLabel})</span>
+                  <span className="font-mono text-zinc-900">₹{fmt(balancePaidNum)}</span>
+                </div>
+                <div className="border-t-2 border-[var(--accent)] pt-2.5 mt-2 flex justify-between items-baseline">
+                  <span className="text-sm font-bold text-[var(--accent)] uppercase">
+                    Total Paid
+                  </span>
+                  <span className="font-mono text-lg font-bold text-[var(--accent)]">
+                    ₹{fmt(depositNum + balancePaidNum)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-zinc-600">
+                  <span>Balance Due</span>
+                  <span className="font-mono text-zinc-900">₹{fmt(0)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between text-zinc-600">
+                  <span>Deposit Paid ({depositLabel})</span>
+                  <span className="font-mono text-zinc-900">− ₹{fmt(depositNum)}</span>
+                </div>
+                <div className="border-t-2 border-[var(--accent)] pt-2.5 mt-2 flex justify-between items-baseline">
+                  <span className="text-sm font-bold text-[var(--accent)] uppercase">
+                    Balance Due
+                  </span>
+                  <span className="font-mono text-lg font-bold text-[var(--accent)]">
+                    ₹{fmt(balanceNum)}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -315,6 +538,7 @@ export default async function AdvanceReceiptPage({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
